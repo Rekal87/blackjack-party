@@ -1,0 +1,5 @@
+# Server-authoritative WebSocket core for the Room
+
+The game is a networked Room of friends where each player's Hand is private until the Round resolves. That means the server must know cards the clients must not — so the server owns the Dealer, the shoe, every Hand, and the settlement. Clients send only intents (bet, hit, stand, double, split) over a WebSocket; the server broadcasts state updates (and the reveal at resolution). We rejected a client-authoritative model because it would leak private cards to the network and open cheating; and plain HTTP polling because turn-by-turn play needs low-latency, order-preserving updates and the Dealer's auto-play.
+
+Consequences: the server is the single source of truth; clients are dumb renderers. Reconnects resume from server state (auto-stand on drop, per design). The free-host deploy target needs a persistent WebSocket server (Bun has first-class WebSocket support), so the static-frontend-plus-serverless path is off the table.
