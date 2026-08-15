@@ -1,5 +1,7 @@
 import { Room } from "./room";
 import type { Deck } from "../shared/cards";
+import type { RoomTimers } from "./room";
+import type { TableConfig } from "./table";
 
 const CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
@@ -14,15 +16,19 @@ function makeCode(length = 4): string {
 export class Rooms {
   private rooms = new Map<string, Room>();
   private deckFactory: () => Deck;
+  private timers: RoomTimers;
+  private tableConfig: TableConfig;
 
-  constructor(deckFactory: () => Deck) {
+  constructor(deckFactory: () => Deck, timers: RoomTimers, tableConfig: TableConfig = {}) {
     this.deckFactory = deckFactory;
+    this.timers = timers;
+    this.tableConfig = tableConfig;
   }
 
   create(hostName: string, socket: Parameters<Room["create"]>[1]): Room {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const room = new Room(code, this.deckFactory);
+    const room = new Room(code, this.deckFactory, this.timers, this.tableConfig);
     room.create(hostName, socket);
     this.rooms.set(code, room);
     return room;

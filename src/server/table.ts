@@ -34,6 +34,7 @@ export interface TableState {
   dealer: TableDealer;
   currentTurn: string | null;
   currentHand: number;
+  bettingEndsAt?: number;
 }
 
 export interface TableConfig {
@@ -103,6 +104,11 @@ export class Table {
     if (amount > player.bankroll) throw new Error("bet exceeds bankroll");
     player.bet = amount;
     if (this.players.every((p) => p.bet > 0)) this.deal();
+  }
+
+  autoDeal(): void {
+    if (this.phase !== "betting") return;
+    this.deal();
   }
 
   hit(playerId: string): void {
@@ -180,7 +186,8 @@ export class Table {
 
   private advanceTurn(): void {
     this.currentHandIndex++;
-    while (this.currentTurnIndex < this.players.length) {
+    let checked = 0;
+    while (checked < this.players.length) {
       const player = this.players[this.currentTurnIndex]!;
       if (this.currentHandIndex < player.hands.length) {
         const hand = player.hands[this.currentHandIndex];
@@ -188,8 +195,9 @@ export class Table {
         this.currentHandIndex++;
         continue;
       }
-      this.currentTurnIndex++;
+      this.currentTurnIndex = (this.currentTurnIndex + 1) % this.players.length;
       this.currentHandIndex = 0;
+      checked++;
     }
     this.dealerPlay();
   }
@@ -197,33 +205,56 @@ export class Table {
   private deal(): void {
     this.deck.shuffle();
     for (const player of this.players) {
-      player.hands = [{ cards: [], status: "active", bet: player.bet }];
+      player.hands =
+        player.bet > 0 ? [{ cards: [], status: "active", bet: player.bet }] : [];
     }
     for (const player of this.players) {
-      player.hands[0]!.cards.push(this.draw());
+      if (player.hands.length > 0) player.hands[0]!.cards.push(this.draw());
     }
     this.dealer = { cards: [this.draw()], holeRevealed: false };
     for (const player of this.players) {
-      player.hands[0]!.cards.push(this.draw());
+      if (player.hands.length > 0) player.hands[0]!.cards.push(this.draw());
     }
     this.dealer.cards.push(this.draw());
     for (const player of this.players) {
-      const hand = player.hands[0]!;
-      if (handValue(hand.cards).total === 21) {
+      const hand = player.hands[0];
+      if (hand && handValue(hand.cards).total === 21) {
         hand.natural = true;
         hand.status = "stood";
       }
     }
-    this.currentTurnIndex = 0;
+    this.currentTurnIndex = (this.round - 1) % Math.max(1, this.players.length);
     this.currentHandIndex = 0;
     this.phase = "acting";
-    while (
-      this.currentTurnIndex < this.players.length &&
-      this.players[this.currentTurnIndex]!.hands[0]!.status !== "active"
-    ) {
-      this.currentTurnIndex++;
+    let checked = 0;
+    while (checked < this.players.length) {
+      const hand = this.players[this.currentTurnIndex]!.hands[0];
+      if (hand && hand.status === "active") return;
+      this.currentTurnIndex = (this.currentTurnIndex + 1) % this.players.length;
+      checked++;
     }
-    if (this.currentTurnIndex >= this.players.length) this.dealerPlay();
+    this.dealerPlay();
+  }
+
+  newRound(): string[] {
+    const removed: string[] = [];
+    this.players = this.players.filter((p) => {
+      if (p.bankroll < this.minBet) {
+        removed.push(p.id);
+        return false;
+      }
+      return true;
+    });
+    this.round++;
+    for (const player of this.players) {
+      player.bet = 0;
+      player.hands = [];
+    }
+    this.dealer = { cards: [], holeRevealed: false };
+    this.phase = "betting";
+    this.currentTurnIndex = 0;
+    this.currentHandIndex = 0;
+    return removed;
   }
 
   private dealerPlay(): void {

@@ -5,7 +5,11 @@ import { createDeck } from "./shared/cards";
 import type { ServerWebSocket, Server } from "bun";
 import type { Room } from "./server/room";
 
-const rooms = new Rooms(() => createDeck());
+const rooms = new Rooms(() => createDeck(), {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  now: () => Date.now(),
+});
 
 interface ClientMessage {
   type: string;
@@ -87,6 +91,9 @@ function handleMessage(ws: Ws, raw: unknown): void {
       }
       case "startTable":
         state.room!.startTable(state.playerId!);
+        break;
+      case "restartTable":
+        state.room!.restartTable(state.playerId!);
         break;
       case "placeBet":
         state.room!.placeBet(state.playerId!, amount ?? 0);

@@ -5,6 +5,7 @@ export type ClientMessage =
   | { type: "createRoom"; name: string }
   | { type: "join"; code: string; name: string }
   | { type: "startTable" }
+  | { type: "restartTable" }
   | { type: "placeBet"; amount: number }
   | { type: "hit" }
   | { type: "stand" }
@@ -14,8 +15,10 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "roomJoined"; room: RoomState; playerId: string }
-  | { type: "playerJoined"; player: { id: string; name: string } }
+  | { type: "playerJoined"; player: { id: string; name: string; spectating: boolean } }
   | { type: "playerLeft"; playerId: string }
+  | { type: "playerSpectating"; playerId: string }
+  | { type: "gameWon"; winnerId: string; winnerName: string }
   | { type: "tableStarted" }
   | { type: "tableState"; state: TableState }
   | { type: "error"; message: string };

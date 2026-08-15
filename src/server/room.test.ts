@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Card, Deck } from "../shared/cards";
-import type { TableState } from "./table";
-import { Room, filterTableState } from "./room";
+import type { TableState, TableConfig } from "./table";
+import { Room, filterTableState, BETTING_WINDOW_MS, ROUND_PAUSE_MS } from "./room";
+import type { RoomTimers } from "./room";
 import { Rooms } from "./rooms";
 
 function card(rank: Card["rank"], suit: Card["suit"]): Card {
@@ -15,6 +16,39 @@ function deckFrom(cards: Card[]): Deck {
     shuffle: () => {},
     reshuffle: () => {},
   };
+}
+
+class FakeTimers implements RoomTimers {
+  time = 0;
+  private nextId = 1;
+  private queue: { id: number; at: number; fn: () => void }[] = [];
+
+  setTimeout(fn: () => void, ms: number): number {
+    const id = this.nextId++;
+    this.queue.push({ id, at: this.time + ms, fn });
+    return id;
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.queue = this.queue.filter((t) => t.id !== handle);
+  }
+
+  now(): number {
+    return this.time;
+  }
+
+  advance(ms: number): void {
+    this.time += ms;
+    const due = this.queue
+      .filter((t) => t.at <= this.time)
+      .sort((a, b) => a.at - b.at);
+    this.queue = this.queue.filter((t) => t.at > this.time);
+    for (const t of due) t.fn();
+  }
+
+  pending(): number {
+    return this.queue.length;
+  }
 }
 
 class FakeSocket {
@@ -39,9 +73,13 @@ const DECK = () =>
     card(3, "clubs"), // dealer draw
   ]);
 
+function makeRooms(deck = DECK, timers = new FakeTimers(), tableConfig: TableConfig = {}) {
+  return { rooms: new Rooms(deck, timers, tableConfig), timers };
+}
+
 describe("Rooms registry", () => {
   test("createRoom assigns a join code and makes its creator the host", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const socket = new FakeSocket();
     const room = rooms.create("Alice", socket);
     expect(room.code).toMatch(/^[A-Z0-9]{4}$/);
@@ -52,7 +90,7 @@ describe("Rooms registry", () => {
   });
 
   test("join by code adds a player", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     const bobSocket = new FakeSocket();
@@ -62,12 +100,12 @@ describe("Rooms registry", () => {
   });
 
   test("join with an unknown code throws", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     expect(() => rooms.join("ZZZZ", "Bob", new FakeSocket())).toThrow(/code/i);
   });
 
   test("join broadcasts a playerJoined message to everyone", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     rooms.join(room.code, "Bob", new FakeSocket());
@@ -79,7 +117,7 @@ describe("Rooms registry", () => {
 
 describe("Room lifecycle", () => {
   test("startTable is rejected for a non-host", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     const bobSocket = new FakeSocket();
@@ -88,7 +126,7 @@ describe("Room lifecycle", () => {
   });
 
   test("startTable begins a table for the host", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     const bobSocket = new FakeSocket();
@@ -100,7 +138,7 @@ describe("Room lifecycle", () => {
   });
 
   test("leave removes a player and broadcasts playerLeft", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     const bobSocket = new FakeSocket();
@@ -163,7 +201,7 @@ describe("filterTableState", () => {
 
 describe("Room: a full round over the wire", () => {
   test("each player receives filtered snapshots through the round", () => {
-    const rooms = new Rooms(DECK);
+    const rooms = makeRooms().rooms;
     const hostSocket = new FakeSocket();
     const room = rooms.create("Alice", hostSocket);
     const bobSocket = new FakeSocket();
@@ -206,5 +244,242 @@ describe("Room: a full round over the wire", () => {
     const bobResult = finalHost.players.find((p) => p.id === bobId)!.hands[0]!.result;
     expect(hostResult).toBe("push");
     expect(bobResult).toBe("won");
+  });
+});
+
+describe("Room: betting window & auto-advance", () => {
+  test("the betting window expires and auto-deals the round", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    expect(timers.pending()).toBe(1);
+
+    room.placeBet(hostId, 100);
+    expect(timers.pending()).toBe(1);
+    expect(room.state().started).toBe(true);
+
+    timers.advance(BETTING_WINDOW_MS);
+    const hostState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(hostState.phase).toBe("acting");
+    expect(hostState.players[0]!.hands[0]!.cards).toHaveLength(2);
+    expect(hostState.players[1]!.hands).toHaveLength(0);
+  });
+
+  test("once everyone has bet the round deals immediately", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+
+    const hostState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(hostState.phase).toBe("acting");
+    expect(timers.pending()).toBe(0);
+  });
+
+  test("the betting window carries a deadline the client can count down", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    room.startTable(room.state().hostId);
+    const hostState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(hostState.bettingEndsAt).toBe(timers.now() + BETTING_WINDOW_MS);
+  });
+
+  test("after a round resolves, the next round starts automatically", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.stand(hostId);
+    room.stand(bobId);
+    const resolveState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(resolveState.phase).toBe("resolve");
+
+    timers.advance(ROUND_PAUSE_MS);
+    const nextState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(nextState.phase).toBe("betting");
+    expect(nextState.round).toBe(2);
+    expect(nextState.players.every((p) => p.bet === 0)).toBe(true);
+  });
+
+  test("a player who drops below the minimum becomes a spectator", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(8, "clubs"), // alice hit -> bust
+        card(6, "clubs"), // bob hit -> 20
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms, timers } = makeRooms(deck, new FakeTimers(), { startingBankroll: 100 });
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.hit(hostId); // alice busts
+    room.hit(bobId); // bob -> 20
+    room.stand(bobId);
+
+    timers.advance(ROUND_PAUSE_MS);
+    const playerSpectating = hostSocket.messages().find(
+      (m) => (m as { type: string }).type === "playerSpectating",
+    );
+    expect(playerSpectating).toBeDefined();
+    const bobRoster = bobSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(bobRoster.players.map((p) => p.id)).toEqual([bobId]);
+  });
+
+  test("the last player standing wins the table", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(8, "clubs"), // alice hit -> bust
+        card(6, "clubs"), // bob hit -> 20
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms, timers } = makeRooms(deck, new FakeTimers(), { startingBankroll: 100 });
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.hit(hostId);
+    room.hit(bobId);
+    room.stand(bobId);
+
+    timers.advance(ROUND_PAUSE_MS);
+    const gameWon = hostSocket.messages().find((m) => (m as { type: string }).type === "gameWon");
+    expect((gameWon as { winnerName?: string } | undefined)?.winnerName).toBe("Bob");
+    expect(timers.pending()).toBe(0);
+  });
+
+  test("the host can start a fresh table with fresh stacks in the same room", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(8, "clubs"), // alice hit -> bust
+        card(6, "clubs"), // bob hit -> 20
+        card(3, "clubs"), // dealer draw -> 17
+        card(4, "spades"), // alice 1 round 2
+        card(5, "hearts"), // bob 1 round 2
+        card(9, "diamonds"), // dealer up round 2
+        card(6, "clubs"), // alice 2 round 2
+        card(7, "clubs"), // bob 2 round 2
+        card(2, "diamonds"), // dealer hole round 2
+      ]);
+    const { rooms, timers } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.hit(hostId);
+    room.hit(bobId);
+    room.stand(bobId);
+
+    timers.advance(ROUND_PAUSE_MS);
+    expect(timers.pending()).toBe(1);
+
+    room.restartTable(hostId);
+    const hostState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(hostState.round).toBe(1);
+    expect(hostState.phase).toBe("betting");
+    expect(hostState.players.map((p) => p.bankroll)).toEqual([1000, 1000]);
+    expect(timers.pending()).toBe(1);
+  });
+
+  test("a solo player keeps playing rounds instead of winning the table", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.stand(hostId);
+
+    timers.advance(ROUND_PAUSE_MS);
+    const nextState = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state)
+      .at(-1)!;
+    expect(nextState.phase).toBe("betting");
+    expect(nextState.round).toBe(2);
+    const gameWon = hostSocket.messages().find((m) => (m as { type: string }).type === "gameWon");
+    expect(gameWon).toBeUndefined();
+    expect(timers.pending()).toBe(1);
+  });
+
+  test("a non-host cannot restart the table", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    room.startTable(room.state().hostId);
+    expect(() => room.restartTable(bobId)).toThrow(/host/i);
   });
 });

@@ -11,7 +11,7 @@ export function WaitingRoom({
   playerId: string;
   onStart: () => void;
 }) {
-  const isHost = connection.roster[0]?.id === playerId;
+  const isHost = connection.hostId === playerId;
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center">
@@ -32,12 +32,12 @@ export function WaitingRoom({
                 <li key={p.id} className="flex items-center gap-2 text-sm">
                   <span
                     className={
-                      p.id === playerId ? "font-semibold text-primary" : p.id === connection.roster[0]?.id ? "font-medium" : ""
+                      p.id === playerId ? "font-semibold text-primary" : p.id === connection.hostId ? "font-medium" : ""
                     }
                   >
                     {p.name}
                   </span>
-                  {p.id === connection.roster[0]?.id && (
+                  {p.id === connection.hostId && (
                     <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">Host</span>
                   )}
                   {p.id === playerId && (

@@ -553,3 +553,106 @@ describe("Table: split", () => {
     expect(() => table.double("alice")).toThrow(/split/i);
   });
 });
+
+describe("Table: betting window & auto-deal", () => {
+  test("autoDeal deals the round even when not everyone has bet", () => {
+    const deck = deckFrom([
+      card(10, "spades"), // alice 1
+      card(9, "clubs"), // bob 1
+      card(6, "diamonds"), // dealer up
+      card(7, "hearts"), // alice 2
+      card(5, "clubs"), // bob 2
+      card(8, "diamonds"), // dealer hole
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    expect(table.state().phase).toBe("betting");
+
+    table.autoDeal();
+    const state = table.state();
+    expect(state.phase).toBe("acting");
+    expect(state.players[0]!.hands[0]!.cards).toHaveLength(2);
+    expect(state.players[1]!.hands).toHaveLength(0);
+  });
+
+  test("autoDeal is a no-op outside the betting phase", () => {
+    const deck = deckFrom([
+      card(10, "spades"),
+      card(6, "diamonds"),
+      card(7, "hearts"),
+      card(8, "diamonds"),
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }], { deck });
+    table.placeBet("alice", 100);
+    expect(table.state().phase).toBe("acting");
+    const before = table.state();
+    table.autoDeal();
+    expect(table.state()).toEqual(before);
+  });
+});
+
+describe("Table: new round", () => {
+  test("newRound clears bets and rotates the starting turn", () => {
+    const deck = deckFrom([
+      card(10, "spades"), // alice 1
+      card(9, "clubs"), // bob 1
+      card(6, "diamonds"), // dealer up
+      card(7, "hearts"), // alice 2
+      card(5, "clubs"), // bob 2
+      card(8, "diamonds"), // dealer hole
+      card(3, "clubs"), // dealer draw to 17
+      card(4, "spades"), // alice 1 round 2
+      card(5, "hearts"), // bob 1 round 2
+      card(9, "diamonds"), // dealer up round 2
+      card(6, "clubs"), // alice 2 round 2
+      card(7, "clubs"), // bob 2 round 2
+      card(2, "diamonds"), // dealer hole round 2
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    table.stand("alice");
+    table.stand("bob");
+    expect(table.state().phase).toBe("resolve");
+
+    table.newRound();
+    expect(table.state().round).toBe(2);
+    expect(table.state().phase).toBe("betting");
+    expect(table.state().players.every((p) => p.bet === 0 && p.hands.length === 0)).toBe(true);
+
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    expect(table.state().currentTurn).toBe("bob");
+  });
+
+  test("newRound removes players whose bankroll fell below the minimum", () => {
+    const deck = deckFrom([
+      card(10, "spades"), // alice 1 -> 17
+      card(9, "clubs"), // bob 1 -> 14
+      card(6, "diamonds"), // dealer up
+      card(7, "hearts"), // alice 2
+      card(5, "clubs"), // bob 2
+      card(8, "diamonds"), // dealer hole -> 14
+      card(8, "clubs"), // alice hit -> bust
+      card(6, "clubs"), // bob hit -> 20
+      card(3, "clubs"), // dealer draw -> 17
+    ]);
+    const table = new Table(
+      [
+        { id: "alice", name: "Alice" },
+        { id: "bob", name: "Bob" },
+      ],
+      { deck, startingBankroll: 100 },
+    );
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    table.hit("alice"); // 25, busts
+    table.hit("bob"); // 20, still active
+    table.stand("bob"); // 20 beats 17
+    expect(table.state().players.find((p) => p.id === "alice")!.bankroll).toBe(0);
+
+    const removed = table.newRound();
+    expect(removed).toEqual(["alice"]);
+    expect(table.state().players.map((p) => p.id)).toEqual(["bob"]);
+  });
+});
