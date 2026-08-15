@@ -42,22 +42,26 @@ export const ROUND_PAUSE_MS = 5_000;
 
 export function filterTableState(state: TableState, viewerId: string): TableState {
   const revealed = state.phase === "resolve";
-  return {
-    ...state,
-    players: state.players.map((player) => {
-      if (player.id === viewerId || revealed) return player;
-      return {
-        ...player,
-        hands: player.hands.map((hand) => ({
-          ...hand,
-          cards: [],
-          hiddenCount: hand.cards.length,
-          natural: undefined,
-          result: undefined,
-        })),
-      };
-    }),
-  };
+  const isParticipant = state.players.some((p) => p.id === viewerId);
+  if (isParticipant && !revealed) {
+    return {
+      ...state,
+      players: state.players.map((player) => {
+        if (player.id === viewerId) return player;
+        return {
+          ...player,
+          hands: player.hands.map((hand) => ({
+            ...hand,
+            cards: [],
+            hiddenCount: hand.cards.length,
+            natural: undefined,
+            result: undefined,
+          })),
+        };
+      }),
+    };
+  }
+  return state;
 }
 
 export class Room {
@@ -107,8 +111,14 @@ export class Room {
 
   join(name: string, socket: RoomSocket): string {
     const id = `p${this.nextPlayerNumber++}`;
-    this.players.push({ id, name, socket, spectating: false, connected: true });
-    this.broadcast({ type: "playerJoined", player: { id, name, spectating: false, connected: true } });
+    const spectating = this.table !== null;
+    this.players.push({ id, name, socket, spectating, connected: true });
+    this.broadcast({ type: "playerJoined", player: { id, name, spectating, connected: true } });
+    if (spectating && this.table) {
+      const raw = this.table.state();
+      const filtered = filterTableState(raw, id);
+      socket.send(JSON.stringify({ type: "tableState", state: filtered }));
+    }
     return id;
   }
 

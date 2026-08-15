@@ -108,7 +108,9 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
             <>
               {amSpectating && (
                 <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm text-amber-100/80 backdrop-blur">
-                  Your bankroll fell below the minimum bet — you're spectating.
+                  {connection.roster.find((p) => p.id === playerId)?.spectating
+                    ? "You're spectating this table — you'll play on the next one."
+                    : "Your bankroll fell below the minimum bet — you're spectating."}
                 </p>
               )}
               {!amSpectating && me && me.bet === 0 && (
