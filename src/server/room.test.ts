@@ -187,14 +187,17 @@ describe("filterTableState", () => {
     expect(filtered.dealer.cards).toEqual([card(6, "diamonds")]);
   });
 
-  test("everyone sees all hands and the hole card once resolved", () => {
+  test("a participant never sees other players' cards, even once resolved", () => {
     const state = makeState();
     state.phase = "resolve";
+    state.players[0]!.hands[0]!.result = "push";
     state.dealer.holeRevealed = true;
     state.dealer.cards = [card(6, "diamonds"), card(8, "diamonds")];
     const filtered = filterTableState(state, "bob");
     const alice = filtered.players.find((p) => p.id === "alice")!;
-    expect(alice.hands[0]!.cards).toEqual([card(10, "spades"), card(7, "hearts")]);
+    expect(alice.hands[0]!.cards).toEqual([]);
+    expect(alice.hands[0]!.hiddenCount).toBe(2);
+    expect(alice.hands[0]!.result).toBe("push");
     expect(filtered.dealer.cards).toEqual([card(6, "diamonds"), card(8, "diamonds")]);
   });
 });
@@ -238,12 +241,13 @@ describe("Room: a full round over the wire", () => {
       .at(-1)!;
     expect(finalHost.phase).toBe("resolve");
     expect(finalHost.players.find((p) => p.id === hostId)!.hands[0]!.cards).toHaveLength(2);
-    expect(finalHost.players.find((p) => p.id === bobId)!.hands[0]!.cards).toHaveLength(3);
+    const bobHand = finalHost.players.find((p) => p.id === bobId)!.hands[0]!;
+    expect(bobHand.cards).toEqual([]);
+    expect(bobHand.hiddenCount).toBe(3);
+    expect(bobHand.result).toBe("won");
     expect(finalHost.dealer.holeRevealed).toBe(true);
     const hostResult = finalHost.players.find((p) => p.id === hostId)!.hands[0]!.result;
-    const bobResult = finalHost.players.find((p) => p.id === bobId)!.hands[0]!.result;
     expect(hostResult).toBe("push");
-    expect(bobResult).toBe("won");
   });
 });
 

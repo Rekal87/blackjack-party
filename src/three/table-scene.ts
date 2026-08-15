@@ -4,8 +4,8 @@ import type { Card } from "../shared/cards";
 import type { TableState } from "../server/table";
 import { cardBackTexture, cardFaceTexture, feltTexture } from "./textures";
 
-const CARD_W = 1.05;
-const CARD_H = 1.47;
+const CARD_W = 0.9;
+const CARD_H = 1.26;
 const CARD_T = 0.06;
 
 interface CardObject {
@@ -561,5 +561,7 @@ function roundedRect2(
 }
 
 export function createBlackjackScene(canvas: HTMLCanvasElement): BlackjackScene {
-  return new BlackjackScene(canvas);
+  const scene = new BlackjackScene(canvas);
+  (window as unknown as Record<string, unknown>).__bjScene = scene;
+  return scene;
 }

@@ -45,7 +45,7 @@ export const ROUND_PAUSE_MS = 5_000;
 export function filterTableState(state: TableState, viewerId: string): TableState {
   const revealed = state.phase === "resolve";
   const isParticipant = state.players.some((p) => p.id === viewerId);
-  if (isParticipant && !revealed) {
+  if (isParticipant) {
     return {
       ...state,
       players: state.players.map((player) => {
@@ -56,8 +56,8 @@ export function filterTableState(state: TableState, viewerId: string): TableStat
             ...hand,
             cards: [],
             hiddenCount: hand.cards.length,
-            natural: undefined,
-            result: undefined,
+            natural: revealed ? hand.natural : undefined,
+            result: revealed ? hand.result : undefined,
           })),
         };
       }),

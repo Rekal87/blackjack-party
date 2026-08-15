@@ -122,6 +122,13 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
 
   const currentTurnName = table.players.find((p) => p.id === table.currentTurn)?.name;
 
+  const netFor = (p: (typeof table.players)[number]) =>
+    p.hands.reduce((sum, h) => {
+      if (h.result === "won") return sum + (h.natural ? Math.round(h.bet * 1.5) : h.bet);
+      if (h.result === "lost") return sum - h.bet;
+      return sum;
+    }, 0);
+
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden">
       <div className="relative min-h-0 flex-1">
@@ -288,9 +295,40 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
             </p>
           )}
           {table.phase === "resolve" && !connection.gameWon && (
-            <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm font-medium text-amber-100 backdrop-blur">
-              Round complete.
-            </p>
+            <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-xl bg-black/60 p-3 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-widest text-amber-100/60">
+                Round {table.round} results
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                {table.players.map((p) => {
+                  const net = netFor(p);
+                  const tone =
+                    net > 0
+                      ? "border-emerald-400/40 text-emerald-200"
+                      : net < 0
+                        ? "border-red-400/40 text-red-200"
+                        : "border-amber-200/20 text-amber-100/70";
+                  return (
+                    <div
+                      key={p.id}
+                      className={
+                        "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm " +
+                        tone +
+                        (p.id === playerId ? " bg-white/10 ring-1 ring-white/20" : " bg-black/30")
+                      }
+                    >
+                      <span className="font-semibold">
+                        {p.name}
+                        {p.id === playerId ? " (you)" : ""}
+                      </span>
+                      <span className="font-mono text-xs opacity-90">
+                        {net > 0 ? `+${net}` : net < 0 ? `${net}` : "push"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </div>
