@@ -106,6 +106,9 @@ function handleMessage(ws: Ws, raw: unknown): void {
       case "restartTable":
         state.room!.restartTable(state.playerId!);
         break;
+      case "addBot":
+        state.room!.addBot(state.playerId!);
+        break;
       case "placeBet":
         state.room!.placeBet(state.playerId!, amount ?? 0);
         break;

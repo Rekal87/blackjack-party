@@ -217,7 +217,7 @@ export class BlackjackScene {
     this.nameSprites.set(id, name);
 
     const chips = new THREE.Group();
-    chips.position.set(pos.x, 0.03, pos.z + 0.6);
+    chips.position.set(pos.x, 0.03, pos.z - 0.95);
     this.scene.add(chips);
     this.chipStacks.set(id, chips);
 
@@ -436,18 +436,16 @@ export class BlackjackScene {
     if (bet <= 0) return;
     const chips = Math.min(6, Math.max(1, Math.round(bet / 25)));
     const colors = ["#e74c3c", "#3498db", "#f1c40f", "#2ecc71"];
-    const offset = (chips - 1) * 0.5;
     for (let i = 0; i < chips; i++) {
       const chip = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.22, 0.06, 24),
+        new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24),
         new THREE.MeshStandardMaterial({
           color: colors[i % colors.length]!,
           roughness: 0.4,
           metalness: 0.3,
         }),
       );
-      chip.rotation.x = Math.PI / 2;
-      chip.position.set(i * 0.11 - offset, 0.02 + i * 0.055, 0);
+      chip.position.set(0, 0.03 + i * 0.06, 0);
       group.add(chip);
     }
   }

@@ -7,6 +7,7 @@ export type ClientMessage =
   | { type: "reconnect"; code: string; playerId: string }
   | { type: "startTable" }
   | { type: "restartTable" }
+  | { type: "addBot" }
   | { type: "placeBet"; amount: number }
   | { type: "hit" }
   | { type: "stand" }
@@ -16,7 +17,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "roomJoined"; room: RoomState; playerId: string }
-  | { type: "playerJoined"; player: { id: string; name: string; spectating: boolean; connected: boolean } }
+  | { type: "playerJoined"; player: { id: string; name: string; spectating: boolean; connected: boolean; isBot?: boolean } }
   | { type: "playerLeft"; playerId: string }
   | { type: "playerSpectating"; playerId: string }
   | { type: "playerDisconnected"; playerId: string }

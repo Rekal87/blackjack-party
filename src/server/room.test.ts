@@ -755,3 +755,101 @@ describe("Room: spectators & late join", () => {
     expect(spectatingMsg).toBeDefined();
   });
 });
+
+describe("Bots", () => {
+  test("addBot is rejected for a non-host", () => {
+    const rooms = makeRooms().rooms;
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    expect(() => room.addBot(bobId)).toThrow(/host/i);
+  });
+
+  test("a host can add a bot to the roster", () => {
+    const rooms = makeRooms().rooms;
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    const state = room.state();
+    expect(state.players.length).toBe(2);
+    const bot = state.players.find((p) => p.isBot);
+    expect(bot).toBeDefined();
+    expect(bot!.name).toBe("Bot 1");
+    expect(bot!.connected).toBe(true);
+  });
+
+  test("adding a bot before the table starts seats it at start", () => {
+    const rooms = makeRooms().rooms;
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    room.startTable(hostId);
+    const table = room.tableState()!;
+    expect(table.players.length).toBe(2);
+    expect(table.players.map((p) => p.name)).toContain("Bot 1");
+  });
+
+  test("a bot places a bet during the betting window", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    room.startTable(hostId);
+    timers.advance(4000);
+    const table = room.tableState()!;
+    const bot = table.players.find((p) => p.name === "Bot 1")!;
+    expect(bot.bet).toBeGreaterThan(0);
+  });
+
+  test("a bot hits when its hand is below 17 and stands when 17+", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // bot 1 -> 15
+        card(6, "diamonds"), // dealer up
+        card(5, "hearts"), // bot 2 -> 15
+        card(8, "diamonds"), // dealer hole -> 14
+        card(4, "clubs"), // bot hit -> 19
+        card(5, "clubs"), // dealer draw -> 19
+      ]);
+    const { rooms, timers } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    room.startTable(hostId);
+
+    // Alice (human) never bets; the window expires and autoDeal runs
+    timers.advance(BETTING_WINDOW_MS);
+    let table = room.tableState()!;
+    expect(table.phase).toBe("acting");
+    const bot = table.players.find((p) => p.name === "Bot 1")!;
+    expect(bot.bet).toBeGreaterThan(0);
+    expect(bot.hands[0]!.cards.length).toBe(2);
+    expect(table.currentTurn).toBe(bot.id);
+
+    // bot hits (15 -> 19) then stands; each advance fires one bot move
+    timers.advance(5000); // hit fires, schedules the stand timer after the window
+    timers.advance(5000); // stand fires
+    table = room.tableState()!;
+    const botHand = table.players.find((p) => p.name === "Bot 1")!.hands[0]!;
+    expect(botHand.cards.length).toBe(3);
+    expect(botHand.status).toBe("stood");
+  });
+
+  test("bots cannot become host when the host disconnects", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    room.disconnect(hostId);
+    expect(room.state().hostId).toBe(bobId);
+    void timers;
+  });
+});

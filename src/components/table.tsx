@@ -135,6 +135,18 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
             <div className="hidden rounded-lg bg-black/40 px-3 py-1.5 text-sm text-amber-100/90 backdrop-blur sm:block">
               Room <span className="font-mono font-semibold">{connection.roomCode}</span> · Round {table.round}
             </div>
+            {amHost && !connection.gameWon && (
+              <button
+                type="button"
+                onClick={() => connection.send({ type: "addBot" })}
+                disabled={connection.roster.length >= 6}
+                className="pointer-events-auto flex h-8 items-center justify-center rounded-lg bg-black/40 px-2.5 text-sm text-amber-100/90 backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Add a bot to play the dealer"
+                aria-label="Add Bot"
+              >
+                Add Bot
+              </button>
+            )}
             <button
               type="button"
               onClick={toggle}
@@ -175,6 +187,7 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
                 }
               >
                 <span className="font-semibold">{p.name}</span>
+                {p.isBot && <span className="ml-1.5 text-amber-200/60">[bot]</span>}
                 {seated ? (
                   <span className="ml-1.5 opacity-80">{seated.bankroll}</span>
                 ) : (

@@ -62,18 +62,25 @@ export class Table {
   private currentHandIndex = 0;
   private minBet: number;
   private maxBet: number;
+  private startingBankroll: number;
 
   constructor(players: { id: string; name: string }[], config: TableConfig = {}) {
     this.deck = config.deck ?? createDeck();
+    this.startingBankroll = config.startingBankroll ?? DEFAULT_BANKROLL;
     this.players = players.map((p) => ({
       ...p,
-      bankroll: config.startingBankroll ?? DEFAULT_BANKROLL,
+      bankroll: this.startingBankroll,
       bet: 0,
       hands: [],
     }));
     this.dealer = { cards: [], holeRevealed: false };
     this.minBet = config.minBet ?? DEFAULT_MIN_BET;
     this.maxBet = config.maxBet ?? DEFAULT_MAX_BET;
+  }
+
+  addPlayer(id: string, name: string): void {
+    if (this.players.some((p) => p.id === id)) return;
+    this.players.push({ id, name, bankroll: this.startingBankroll, bet: 0, hands: [] });
   }
 
   state(): TableState {

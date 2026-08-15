@@ -52,14 +52,27 @@ export function WaitingRoom({
                   {p.id === playerId && (
                     <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">You</span>
                   )}
+                  {p.isBot && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">Bot</span>
+                  )}
                 </li>
               ))}
             </ul>
           </div>
           {isHost && (
-            <Button onClick={onStart} className="w-full">
-              Start Table
-            </Button>
+            <div className="flex flex-col gap-2">
+              <Button onClick={onStart} className="w-full">
+                Start Table
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => connection.send({ type: "addBot" })}
+                className="w-full"
+                disabled={connection.roster.length >= 6}
+              >
+                Add Bot
+              </Button>
+            </div>
           )}
           {!isHost && <p className="text-center text-sm text-muted-foreground">The Host will start the table.</p>}
           {connection.error && <p className="text-sm text-destructive">{connection.error}</p>}

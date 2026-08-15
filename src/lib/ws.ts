@@ -7,7 +7,7 @@ export interface GameConnection {
   playerId: string | null;
   hostId: string | null;
   roomCode: string | null;
-  roster: { id: string; name: string; spectating: boolean; connected: boolean }[];
+  roster: { id: string; name: string; spectating: boolean; connected: boolean; isBot?: boolean }[];
   tableStarted: boolean;
   table: TableState | null;
   gameWon: { winnerId: string; winnerName: string } | null;

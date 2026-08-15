@@ -1,5 +1,6 @@
 import { Table } from "./table";
 import type { Card, Deck } from "../shared/cards";
+import { handValue } from "../shared/cards";
 import type { TableConfig, TableState } from "./table";
 
 export interface RoomSocket {
@@ -11,6 +12,7 @@ export interface RoomPlayer {
   name: string;
   spectating: boolean;
   connected: boolean;
+  isBot?: boolean;
 }
 
 export interface RoomState {
@@ -66,15 +68,17 @@ export function filterTableState(state: TableState, viewerId: string): TableStat
 
 export class Room {
   readonly code: string;
-  private players: { id: string; name: string; socket: RoomSocket | null; spectating: boolean; connected: boolean }[] = [];
+  private players: { id: string; name: string; socket: RoomSocket | null; spectating: boolean; connected: boolean; isBot: boolean }[] = [];
   private hostId: string | null = null;
   private table: Table | null = null;
   private deckFactory: () => Deck;
   private timers: RoomTimers;
   private tableConfig: TableConfig;
   private nextPlayerNumber = 1;
+  private nextBotNumber = 1;
   private bettingTimer: unknown = null;
   private roundTimer: unknown = null;
+  private botTimers = new Map<string, unknown>();
   private bettingEndsAt: number | null = null;
 
   constructor(
@@ -93,7 +97,13 @@ export class Room {
     return {
       code: this.code,
       hostId: this.hostId!,
-      players: this.players.map((p) => ({ id: p.id, name: p.name, spectating: p.spectating, connected: p.connected })),
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        spectating: p.spectating,
+        connected: p.connected,
+        isBot: p.isBot,
+      })),
       started: this.table !== null,
     };
   }
@@ -104,7 +114,7 @@ export class Room {
 
   create(name: string, socket: RoomSocket): string {
     const id = `p${this.nextPlayerNumber++}`;
-    this.players.push({ id, name, socket, spectating: false, connected: true });
+    this.players.push({ id, name, socket, spectating: false, connected: true, isBot: false });
     this.hostId = id;
     return id;
   }
@@ -112,14 +122,28 @@ export class Room {
   join(name: string, socket: RoomSocket): string {
     const id = `p${this.nextPlayerNumber++}`;
     const spectating = this.table !== null;
-    this.players.push({ id, name, socket, spectating, connected: true });
-    this.broadcast({ type: "playerJoined", player: { id, name, spectating, connected: true } });
+    this.players.push({ id, name, socket, spectating, connected: true, isBot: false });
+    this.broadcast({ type: "playerJoined", player: { id, name, spectating, connected: true, isBot: false } });
     if (spectating && this.table) {
       const raw = this.table.state();
       const filtered = filterTableState(raw, id);
       socket.send(JSON.stringify({ type: "tableState", state: filtered }));
     }
     return id;
+  }
+
+  addBot(playerId: string): void {
+    if (playerId !== this.hostId) throw new Error("only the host can add bots");
+    if (this.players.filter((p) => !p.spectating).length >= 6) throw new Error("the table is full");
+    const id = `b${this.nextBotNumber++}`;
+    const name = `Bot ${this.players.filter((p) => p.isBot).length + 1}`;
+    const isBot = true;
+    this.players.push({ id, name, socket: null, spectating: false, connected: true, isBot });
+    this.broadcast({ type: "playerJoined", player: { id, name, spectating: false, connected: true, isBot } });
+    if (this.table) {
+      this.table.addPlayer(id, name);
+      this.afterTableChange();
+    }
   }
 
   startTable(playerId: string): void {
@@ -131,6 +155,7 @@ export class Room {
     if (playerId !== this.hostId) throw new Error("only the host can restart the table");
     this.clearBettingTimer();
     this.clearRoundTimer();
+    this.clearBotTimers();
     for (const player of this.players) player.spectating = false;
     this.createTable(playerId);
   }
@@ -207,7 +232,7 @@ export class Room {
   }
 
   private hostHandover(): void {
-    const next = this.players.find((p) => p.connected);
+    const next = this.players.find((p) => p.connected && !p.isBot);
     if (next) {
       this.hostId = next.id;
       this.broadcast({ type: "hostChanged", hostId: next.id });
@@ -218,6 +243,7 @@ export class Room {
     this.clearBettingTimer();
     this.bettingEndsAt = this.timers.now() + BETTING_WINDOW_MS;
     this.bettingTimer = this.timers.setTimeout(() => this.onBettingExpired(), BETTING_WINDOW_MS);
+    this.scheduleBotActions();
     this.broadcastTableState();
   }
 
@@ -233,8 +259,78 @@ export class Room {
     const phase = this.table.state().phase;
     if (phase !== "betting") this.clearBettingTimer();
     if (phase === "resolve") this.scheduleNextRound();
-    if (phase === "acting") this.skipDisconnectedTurn();
+    if (phase === "acting") {
+      this.skipDisconnectedTurn();
+      this.scheduleBotActions();
+    }
+    if (phase === "betting") this.scheduleBotActions();
     this.broadcastTableState();
+  }
+
+  private scheduleBotActions(): void {
+    if (!this.table) return;
+    const state = this.table.state();
+    const bots = this.players.filter((p) => p.isBot);
+
+    if (state.phase === "betting") {
+      for (const bot of bots) {
+        const player = state.players.find((p) => p.id === bot.id);
+        if (!player || player.bet > 0) continue;
+        this.scheduleBotBet(bot.id);
+      }
+    }
+
+    if (state.phase === "acting") {
+      const current = state.currentTurn;
+      if (!current) return;
+      const bot = bots.find((p) => p.id === current);
+      if (!bot) return;
+      const key = `${bot.id}:${state.currentHand}`;
+      if (this.botTimers.has(key)) return;
+      this.scheduleBotMove(bot.id, state.currentHand);
+    }
+  }
+
+  private scheduleBotBet(botId: string): void {
+    if (this.botTimers.has(botId)) return;
+    const handle = this.timers.setTimeout(() => {
+      this.botTimers.delete(botId);
+      if (!this.table) return;
+      const state = this.table.state();
+      if (state.phase !== "betting") return;
+      const player = state.players.find((p) => p.id === botId);
+      if (!player || player.bet > 0) return;
+      const options = [50, 100, 150, 200].filter((v) => v <= player.bankroll);
+      const amount = options.length > 0 ? options[Math.floor(Math.random() * options.length)]! : 50;
+      this.placeBet(botId, amount);
+    }, 1200 + Math.random() * 2000);
+    this.botTimers.set(botId, handle);
+  }
+
+  private scheduleBotMove(botId: string, handIndex: number): void {
+    const key = `${botId}:${handIndex}`;
+    const handle = this.timers.setTimeout(() => {
+      this.botTimers.delete(key);
+      if (!this.table) return;
+      const state = this.table.state();
+      if (state.phase !== "acting" || state.currentTurn !== botId) return;
+      const player = state.players.find((p) => p.id === botId);
+      const hand = player?.hands[state.currentHand];
+      if (!hand) return;
+      const total = handValue(hand.cards).total;
+      try {
+        if (total <= 11 && hand.cards.length === 2 && hand.bet * 2 <= player!.bankroll) {
+          this.double(botId);
+        } else if (total < 17) {
+          this.hit(botId);
+        } else {
+          this.stand(botId);
+        }
+      } catch {
+        // bot moves can fail on edge cases (e.g. table settled); ignore
+      }
+    }, 900 + Math.random() * 1200);
+    this.botTimers.set(key, handle);
   }
 
   private skipDisconnectedTurn(): void {
@@ -290,6 +386,11 @@ export class Room {
       this.timers.clearTimeout(this.roundTimer);
       this.roundTimer = null;
     }
+  }
+
+  private clearBotTimers(): void {
+    for (const handle of this.botTimers.values()) this.timers.clearTimeout(handle);
+    this.botTimers.clear();
   }
 
   private broadcastTableState(): void {
