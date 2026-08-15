@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CardRow } from "./playing-card";
+import { ThreeTableCanvas } from "./three-table-canvas";
 import type { GameConnection } from "@/lib/ws";
-import type { TableState } from "@/server/table";
-import type { Card } from "@/shared/cards";
 
 export function Table({ connection, playerId }: { connection: GameConnection; playerId: string }) {
   const table = connection.table;
@@ -34,111 +32,50 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
     myActiveHand.cards[0]!.rank === myActiveHand.cards[1]!.rank &&
     myActiveHand.bet * 2 <= me!.bankroll;
 
-  const renderTable = (table: TableState) => {
-    return (
-    <div className="flex min-h-screen w-full flex-col items-center gap-8 p-6">
-      <div className="flex w-full max-w-4xl items-center justify-between">
-        <h1 className="text-2xl font-bold">Blackjack Party</h1>
-        <div className="text-sm text-muted-foreground">
-          Room <span className="font-mono font-semibold text-foreground">{connection.roomCode}</span> · Round{" "}
-          {table.round}
-        </div>
-      </div>
+  const currentTurnName = table.players.find((p) => p.id === table.currentTurn)?.name;
 
-      <div className="flex w-full max-w-4xl flex-col gap-10">
-        <section className="flex flex-col items-center gap-3">
-          <h2 className="text-sm font-medium uppercase tracking-widest text-muted-foreground">Dealer</h2>
-          <CardRow cards={table.dealer.cards} />
-          <div className="text-sm font-semibold">
-            {table.dealer.holeRevealed && (
-              <span>{table.dealer.cards.reduce((sum, c) => sum + cardValue(c), 0)}</span>
-            )}
+  return (
+    <div className="relative flex h-screen w-full flex-col overflow-hidden">
+      <div className="relative min-h-0 flex-1">
+        <ThreeTableCanvas table={table} playerId={playerId} />
+
+        <div className="pointer-events-none absolute left-0 top-0 flex w-full items-center justify-between p-4">
+          <h1 className="rounded-lg bg-black/40 px-3 py-1.5 text-lg font-bold text-amber-100 backdrop-blur">
+            Blackjack Party
+          </h1>
+          <div className="rounded-lg bg-black/40 px-3 py-1.5 text-sm text-amber-100/90 backdrop-blur">
+            Room <span className="font-mono font-semibold">{connection.roomCode}</span> · Round {table.round}
           </div>
-        </section>
+        </div>
 
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {table.players.map((p) => {
-            const isMe = p.id === playerId;
-            return (
-              <div
-                key={p.id}
-                className={
-                  "rounded-xl border p-4 " + (table.currentTurn === p.id && table.phase === "acting"
-                    ? "border-primary bg-primary/5"
-                    : "border-border bg-card")
-                }
-              >
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className={"font-semibold " + (isMe ? "text-primary" : "")}>
-                    {p.name}
-                    {isMe ? " (you)" : ""}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {p.bankroll} chips{isMe ? ` · bet ${p.hands.reduce((s, h) => s + h.bet, 0) || p.bet}` : ""}
-                  </span>
-                </div>
-                {p.hands.length > 0 ? (
-                  <div className="flex flex-wrap gap-3">
-                    {p.hands.map((hand, handIndex) => {
-                      const isActiveHand =
-                        table.currentTurn === p.id && table.phase === "acting" && table.currentHand === handIndex;
-                      return (
-                        <div
-                          key={handIndex}
-                          className={
-                            "flex flex-col gap-2 rounded-lg p-2 " +
-                            (isActiveHand ? "ring-2 ring-primary" : "")
-                          }
-                        >
-                          <CardRow cards={hand.cards} hiddenCount={hand.hiddenCount} />
-                          <div className="flex items-center gap-2 text-xs">
-                            {hand.natural && (
-                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600">
-                                Blackjack
-                              </span>
-                            )}
-                            {hand.status !== "active" && hand.status !== "stood" && (
-                              <span className="rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
-                                {hand.status}
-                              </span>
-                            )}
-                            {hand.result && (
-                              <span
-                                className={
-                                  "rounded px-1.5 py-0.5 font-medium " +
-                                  (hand.result === "won"
-                                    ? "bg-emerald-500/10 text-emerald-600"
-                                    : hand.result === "lost"
-                                      ? "bg-destructive/10 text-destructive"
-                                      : "bg-muted text-muted-foreground")
-                                }
-                              >
-                                {hand.result}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Waiting for cards…</p>
-                )}
-              </div>
-            );
-          })}
-        </section>
+        <div className="pointer-events-none absolute bottom-4 right-4 flex flex-col gap-1.5 text-right">
+          {table.players.map((p) => (
+            <div
+              key={p.id}
+              className={
+                "rounded-md px-2.5 py-1 text-xs backdrop-blur " +
+                (table.currentTurn === p.id && table.phase === "acting"
+                  ? "bg-amber-500/80 text-black"
+                  : "bg-black/45 text-amber-100/90")
+              }
+            >
+              <span className="font-semibold">{p.name}</span>
+              <span className="ml-1.5 opacity-80">{p.bankroll}</span>
+              {p.id === playerId && <span className="ml-1 opacity-60">(you)</span>}
+            </div>
+          ))}
+        </div>
 
-        <section className="flex flex-col items-center gap-3">
+        <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
           {betting && me && me.bet === 0 && (
-            <div className="flex items-center gap-2">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-black/50 p-3 backdrop-blur">
               <Input
                 type="number"
                 min={10}
                 max={200}
                 value={betAmount}
                 onChange={(e) => setBetAmount(e.target.value)}
-                className="w-32"
+                className="w-28"
                 aria-label="Bet amount"
               />
               <Button onClick={() => connection.send({ type: "placeBet", amount })} disabled={!canBet}>
@@ -146,9 +83,13 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
               </Button>
             </div>
           )}
-          {betting && me && me.bet > 0 && <p className="text-sm text-muted-foreground">Waiting for everyone to bet…</p>}
+          {betting && me && me.bet > 0 && (
+            <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm text-amber-100 backdrop-blur">
+              Waiting for everyone to bet…
+            </p>
+          )}
           {myTurn && (
-            <div className="flex items-center gap-3">
+            <div className="pointer-events-auto flex items-center gap-3 rounded-xl bg-black/50 p-3 backdrop-blur">
               <Button onClick={() => connection.send({ type: "hit" })}>Hit</Button>
               <Button variant="secondary" onClick={() => connection.send({ type: "stand" })}>
                 Stand
@@ -165,24 +106,23 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
               )}
             </div>
           )}
-          {isDealerPlaying && <p className="text-sm text-muted-foreground">Dealer is playing…</p>}
-          {table.phase === "acting" && !myTurn && (
-            <p className="text-sm text-muted-foreground">
-              Waiting for {table.players.find((p) => p.id === table.currentTurn)?.name}…
+          {isDealerPlaying && (
+            <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm text-amber-100 backdrop-blur">
+              Dealer is playing…
             </p>
           )}
-          {table.phase === "resolve" && <p className="text-sm font-medium text-muted-foreground">Round complete.</p>}
-        </section>
+          {table.phase === "acting" && !myTurn && (
+            <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm text-amber-100 backdrop-blur">
+              Waiting for {currentTurnName}…
+            </p>
+          )}
+          {table.phase === "resolve" && (
+            <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm font-medium text-amber-100 backdrop-blur">
+              Round complete.
+            </p>
+          )}
+        </div>
       </div>
     </div>
-    );
-  };
-
-  return renderTable(table);
-}
-
-function cardValue(card: Card): number {
-  if (card.rank === "A") return 1;
-  if (typeof card.rank === "number") return card.rank;
-  return 10;
+  );
 }
