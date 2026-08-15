@@ -40,4 +40,10 @@ export class Rooms {
     room.join(name, socket);
     return room;
   }
+
+  joinRoom(code: string, _playerId: string): Room {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room) throw new Error(`no room with code ${code}`);
+    return room;
+  }
 }

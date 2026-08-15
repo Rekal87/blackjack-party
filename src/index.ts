@@ -16,6 +16,7 @@ interface ClientMessage {
   name?: string;
   code?: string;
   amount?: number;
+  playerId?: string;
 }
 
 interface WsData {
@@ -46,7 +47,10 @@ const server = serve<WsData>({
     message(ws, raw) {
       handleMessage(ws, raw);
     },
-    close(ws) {},
+    close(ws) {
+      const { room, playerId } = ws.data;
+      if (room && playerId) room.disconnect(playerId);
+    },
   },
   development: process.env.NODE_ENV !== "production" && {
     hmr: true,
@@ -68,7 +72,7 @@ function handleMessage(ws: Ws, raw: unknown): void {
   }
   if (!isClientMessage(message)) return;
 
-  const { type, name, code, amount } = message;
+  const { type, name, code, amount, playerId } = message;
   const state = ws.data;
 
   try {
@@ -87,6 +91,13 @@ function handleMessage(ws: Ws, raw: unknown): void {
         state.room = room;
         state.playerId = playerId;
         send(ws, { type: "roomJoined", room: room.state(), playerId });
+        break;
+      }
+      case "reconnect": {
+        const room = rooms.joinRoom(code ?? "", playerId ?? "");
+        room.reconnect(playerId!, ws);
+        state.room = room;
+        state.playerId = playerId;
         break;
       }
       case "startTable":

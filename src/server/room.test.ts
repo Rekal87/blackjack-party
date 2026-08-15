@@ -483,3 +483,133 @@ describe("Room: betting window & auto-advance", () => {
     expect(() => room.restartTable(bobId)).toThrow(/host/i);
   });
 });
+
+describe("Room: disconnect, reconnect & host handover", () => {
+  test("a disconnect mid-round auto-stands the player's hand and play continues", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1
+        card(9, "clubs"), // bob 1
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms, timers } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    expect(room.tableState()!.phase).toBe("acting");
+    expect(room.tableState()!.currentTurn).toBe(hostId);
+
+    room.disconnect(hostId); // alice is mid-turn and drops
+    const state = room.tableState()!;
+    expect(state.players.find((p) => p.id === hostId)!.hands[0]!.status).toBe("stood");
+    expect(state.currentTurn).toBe(bobId);
+    const disconnected = bobSocket.messages().find((m) => (m as { type: string }).type === "playerDisconnected");
+    expect(disconnected).toBeDefined();
+  });
+
+  test("a disconnected player can reconnect and keeps their bankroll", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms, timers } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.stand(hostId); // alice pushes (17 vs 17)
+    room.stand(bobId);
+
+    room.disconnect(hostId);
+    const before = room.tableState()!.players.find((p) => p.id === hostId)!.bankroll;
+
+    const newSocket = new FakeSocket();
+    room.reconnect(hostId, newSocket);
+    const roomJoined = newSocket.messages().find((m) => (m as { type: string }).type === "roomJoined");
+    expect(roomJoined).toBeDefined();
+    expect(room.tableState()!.players.find((p) => p.id === hostId)!.bankroll).toBe(before);
+    const reconnected = bobSocket.messages().find((m) => (m as { type: string }).type === "playerReconnected");
+    expect(reconnected).toBeDefined();
+  });
+
+  test("reconnect with an unknown playerId throws", () => {
+    const { rooms } = makeRooms();
+    const room = rooms.create("Alice", new FakeSocket());
+    expect(() => room.reconnect("p99", new FakeSocket())).toThrow(/unknown player/);
+  });
+
+  test("if the host leaves, host role passes to the next player", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+
+    room.leave(hostId);
+    expect(room.state().hostId).toBe(bobId);
+    const hostChanged = bobSocket.messages().find((m) => (m as { type: string }).type === "hostChanged");
+    expect((hostChanged as { hostId?: string } | undefined)?.hostId).toBe(bobId);
+  });
+
+  test("if the host disconnects, host role passes to the next connected player", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+
+    room.disconnect(hostId);
+    expect(room.state().hostId).toBe(bobId);
+  });
+
+  test("a room survives its host disconnecting", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+
+    room.disconnect(hostId);
+    expect(room.state().players.map((p) => p.id)).toEqual([hostId, bobId]);
+    expect(room.state().started).toBe(true);
+    expect(room.state().players.find((p) => p.id === hostId)!.connected).toBe(false);
+    expect(room.state().players.find((p) => p.id === bobId)!.connected).toBe(true);
+    expect(room.state().hostId).toBe(bobId);
+  });
+
+  test("reconnecting the new host lets them restart the table", () => {
+    const { rooms, timers } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    room.startTable(room.state().hostId);
+
+    room.disconnect(room.state().hostId);
+    expect(room.state().hostId).toBe(bobId);
+    expect(() => room.restartTable(bobId)).not.toThrow();
+  });
+});

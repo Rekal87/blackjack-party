@@ -32,11 +32,20 @@ export function WaitingRoom({
                 <li key={p.id} className="flex items-center gap-2 text-sm">
                   <span
                     className={
-                      p.id === playerId ? "font-semibold text-primary" : p.id === connection.hostId ? "font-medium" : ""
+                      p.id === playerId
+                        ? "font-semibold text-primary"
+                        : p.id === connection.hostId
+                          ? "font-medium"
+                          : p.connected
+                            ? ""
+                            : "text-muted-foreground/60 line-through"
                     }
                   >
                     {p.name}
                   </span>
+                  {!p.connected && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">offline</span>
+                  )}
                   {p.id === connection.hostId && (
                     <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">Host</span>
                   )}

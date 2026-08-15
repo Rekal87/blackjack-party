@@ -82,6 +82,7 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
                 ) : (
                   <span className="ml-1.5 text-amber-200/60">spectating</span>
                 )}
+                {!p.connected && <span className="ml-1.5 text-red-300/80">offline</span>}
                 {p.id === playerId && <span className="ml-1 opacity-60">(you)</span>}
               </div>
             );

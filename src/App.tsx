@@ -8,9 +8,11 @@ export function App() {
   const connection = useGameConnection();
   const playerId = connection.playerId;
 
-  if (connection.status === "connecting") {
+  if (connection.status === "connecting" || connection.status === "closed") {
     return (
-      <div className="flex min-h-screen items-center justify-center text-muted-foreground">Connecting…</div>
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        {connection.status === "closed" ? "Connection lost — reconnecting…" : "Connecting…"}
+      </div>
     );
   }
 

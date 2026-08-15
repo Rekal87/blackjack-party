@@ -554,6 +554,111 @@ describe("Table: split", () => {
   });
 });
 
+describe("Table: disconnect handling", () => {
+  test("standPlayer stands a player's hand but does not advance when it is not their turn", () => {
+    const deck = deckFrom([
+      card(10, "spades"),
+      card(9, "clubs"),
+      card(6, "diamonds"),
+      card(7, "hearts"),
+      card(5, "clubs"),
+      card(8, "diamonds"),
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    expect(table.state().currentTurn).toBe("alice");
+
+    table.standPlayer("bob");
+    const state = table.state();
+    expect(state.players.find((p) => p.id === "bob")!.hands[0]!.status).toBe("stood");
+    expect(state.currentTurn).toBe("alice");
+  });
+
+  test("standPlayer stands the hand and advances when it is their turn", () => {
+    const deck = deckFrom([
+      card(10, "spades"),
+      card(9, "clubs"),
+      card(6, "diamonds"),
+      card(7, "hearts"),
+      card(5, "clubs"),
+      card(8, "diamonds"),
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    expect(table.state().currentTurn).toBe("alice");
+
+    table.standPlayer("alice");
+    const state = table.state();
+    expect(state.players.find((p) => p.id === "alice")!.hands[0]!.status).toBe("stood");
+    expect(state.currentTurn).toBe("bob");
+  });
+
+  test("standPlayer skips an already-stood player and reaches the next active hand", () => {
+    const deck = deckFrom([
+      card(10, "spades"), // alice 1
+      card(9, "clubs"), // bob 1
+      card(6, "diamonds"), // dealer up
+      card(7, "hearts"), // alice 2
+      card(5, "clubs"), // bob 2
+      card(8, "diamonds"), // dealer hole
+      card(3, "clubs"), // dealer draw -> 17
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    table.stand("alice");
+
+    table.standPlayer("bob");
+    const state = table.state();
+    expect(state.players.find((p) => p.id === "bob")!.hands[0]!.status).toBe("stood");
+    expect(state.phase).toBe("resolve");
+  });
+
+  test("removePlayer removes a player from the table", () => {
+    const deck = deckFrom([
+      card(10, "spades"),
+      card(9, "clubs"),
+      card(6, "diamonds"),
+      card(7, "hearts"),
+      card(5, "clubs"),
+      card(8, "diamonds"),
+    ]);
+    const table = new Table([{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }], { deck });
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    table.removePlayer("bob");
+    expect(table.state().players.map((p) => p.id)).toEqual(["alice"]);
+  });
+
+  test("removePlayer advances past the removed player when it was their turn", () => {
+    const deck = deckFrom([
+      card(10, "spades"), // alice 1
+      card(9, "clubs"), // bob 1
+      card(8, "hearts"), // carol 1
+      card(6, "diamonds"), // dealer up
+      card(7, "hearts"), // alice 2
+      card(5, "clubs"), // bob 2
+      card(4, "diamonds"), // carol 2
+      card(2, "clubs"), // dealer hole
+    ]);
+    const table = new Table(
+      [{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }, { id: "carol", name: "Carol" }],
+      { deck },
+    );
+    table.placeBet("alice", 100);
+    table.placeBet("bob", 100);
+    table.placeBet("carol", 100);
+    expect(table.state().currentTurn).toBe("alice");
+
+    table.removePlayer("alice");
+    const state = table.state();
+    expect(state.players.map((p) => p.id)).toEqual(["bob", "carol"]);
+    expect(state.currentTurn).toBe("bob");
+  });
+});
+
 describe("Table: betting window & auto-deal", () => {
   test("autoDeal deals the round even when not everyone has bet", () => {
     const deck = deckFrom([

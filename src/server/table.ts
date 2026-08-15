@@ -132,6 +132,30 @@ export class Table {
     this.advanceTurn();
   }
 
+  standPlayer(playerId: string): void {
+    const player = this.findPlayer(playerId);
+    for (const hand of player.hands) {
+      if (hand.status === "active") hand.status = "stood";
+    }
+    if (this.phase === "acting" && this.currentPlayer().id === playerId) {
+      this.advanceTurn();
+    }
+  }
+
+  removePlayer(playerId: string): void {
+    const index = this.players.findIndex((p) => p.id === playerId);
+    if (index === -1) return;
+    const wasCurrent = this.phase === "acting" && index === this.currentTurnIndex;
+    this.players.splice(index, 1);
+    if (this.phase !== "acting") return;
+    if (index < this.currentTurnIndex) {
+      this.currentTurnIndex--;
+    } else if (wasCurrent) {
+      if (this.currentTurnIndex >= this.players.length) this.currentTurnIndex = 0;
+      this.advanceToNextActive();
+    }
+  }
+
   double(playerId: string): void {
     if (this.phase !== "acting") throw new Error("not in the acting phase");
     this.assertCurrent(playerId);
@@ -186,6 +210,10 @@ export class Table {
 
   private advanceTurn(): void {
     this.currentHandIndex++;
+    this.advanceToNextActive();
+  }
+
+  private advanceToNextActive(): void {
     let checked = 0;
     while (checked < this.players.length) {
       const player = this.players[this.currentTurnIndex]!;

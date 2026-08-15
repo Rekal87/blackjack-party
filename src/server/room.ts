@@ -10,6 +10,7 @@ export interface RoomPlayer {
   id: string;
   name: string;
   spectating: boolean;
+  connected: boolean;
 }
 
 export interface RoomState {
@@ -61,7 +62,7 @@ export function filterTableState(state: TableState, viewerId: string): TableStat
 
 export class Room {
   readonly code: string;
-  private players: { id: string; name: string; socket: RoomSocket; spectating: boolean }[] = [];
+  private players: { id: string; name: string; socket: RoomSocket | null; spectating: boolean; connected: boolean }[] = [];
   private hostId: string | null = null;
   private table: Table | null = null;
   private deckFactory: () => Deck;
@@ -88,22 +89,26 @@ export class Room {
     return {
       code: this.code,
       hostId: this.hostId!,
-      players: this.players.map((p) => ({ id: p.id, name: p.name, spectating: p.spectating })),
+      players: this.players.map((p) => ({ id: p.id, name: p.name, spectating: p.spectating, connected: p.connected })),
       started: this.table !== null,
     };
   }
 
+  tableState(): TableState | null {
+    return this.table ? this.table.state() : null;
+  }
+
   create(name: string, socket: RoomSocket): string {
     const id = `p${this.nextPlayerNumber++}`;
-    this.players.push({ id, name, socket, spectating: false });
+    this.players.push({ id, name, socket, spectating: false, connected: true });
     this.hostId = id;
     return id;
   }
 
   join(name: string, socket: RoomSocket): string {
     const id = `p${this.nextPlayerNumber++}`;
-    this.players.push({ id, name, socket, spectating: false });
-    this.broadcast({ type: "playerJoined", player: { id, name, spectating: false } });
+    this.players.push({ id, name, socket, spectating: false, connected: true });
+    this.broadcast({ type: "playerJoined", player: { id, name, spectating: false, connected: true } });
     return id;
   }
 
@@ -158,7 +163,45 @@ export class Room {
     const player = this.players.find((p) => p.id === playerId);
     if (!player) return;
     this.players = this.players.filter((p) => p.id !== playerId);
+    if (this.hostId === playerId) this.hostHandover();
+    if (this.table) {
+      this.table.removePlayer(playerId);
+      this.afterTableChange();
+    }
     this.broadcast({ type: "playerLeft", playerId });
+  }
+
+  disconnect(playerId: string): void {
+    const player = this.players.find((p) => p.id === playerId);
+    if (!player) return;
+    player.socket = null;
+    player.connected = false;
+    this.broadcast({ type: "playerDisconnected", playerId });
+    if (this.hostId === playerId) this.hostHandover();
+    if (!this.table) return;
+    const state = this.table.state();
+    if (state.phase === "acting") {
+      this.table.standPlayer(playerId);
+      this.afterTableChange();
+    }
+  }
+
+  reconnect(playerId: string, socket: RoomSocket): void {
+    const player = this.players.find((p) => p.id === playerId);
+    if (!player) throw new Error(`unknown player: ${playerId}`);
+    player.socket = socket;
+    player.connected = true;
+    this.broadcast({ type: "playerReconnected", playerId });
+    socket.send(JSON.stringify({ type: "roomJoined", room: this.state(), playerId }));
+    if (this.table) this.broadcastTableState();
+  }
+
+  private hostHandover(): void {
+    const next = this.players.find((p) => p.connected);
+    if (next) {
+      this.hostId = next.id;
+      this.broadcast({ type: "hostChanged", hostId: next.id });
+    }
   }
 
   private beginBetting(): void {
@@ -180,7 +223,22 @@ export class Room {
     const phase = this.table.state().phase;
     if (phase !== "betting") this.clearBettingTimer();
     if (phase === "resolve") this.scheduleNextRound();
+    if (phase === "acting") this.skipDisconnectedTurn();
     this.broadcastTableState();
+  }
+
+  private skipDisconnectedTurn(): void {
+    if (!this.table) return;
+    let guard = 0;
+    while (guard++ < this.players.length) {
+      const state = this.table.state();
+      if (state.phase !== "acting") return;
+      const current = state.currentTurn;
+      if (!current) return;
+      const player = this.players.find((p) => p.id === current);
+      if (player && player.connected) return;
+      this.table.standPlayer(current);
+    }
   }
 
   private scheduleNextRound(): void {
@@ -231,6 +289,7 @@ export class Room {
       raw.bettingEndsAt = this.bettingEndsAt;
     }
     for (const player of this.players) {
+      if (!player.connected || !player.socket) continue;
       const filtered = filterTableState(raw, player.id);
       player.socket.send(JSON.stringify({ type: "tableState", state: filtered }));
     }
@@ -239,7 +298,7 @@ export class Room {
   private broadcast(message: ServerMessage): void {
     const data = JSON.stringify(message);
     for (const player of this.players) {
-      player.socket.send(data);
+      if (player.connected && player.socket) player.socket.send(data);
     }
   }
 }
