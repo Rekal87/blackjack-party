@@ -184,6 +184,7 @@ export class BlackjackScene {
       if (this.playerSlots.has(p.id)) continue;
       this.addSeat(p.id);
     }
+    this.repositionSeats();
     const deckPos = new THREE.Vector3(0, 0.6, -4.4);
     for (const p of state.players) {
       const slots = this.playerSlots.get(p.id)!;
@@ -203,21 +204,16 @@ export class BlackjackScene {
   }
 
   private addSeat(id: string): void {
-    const index = this.playerSlots.size;
-    const angle = 0.18 + index * 0.32;
-    const x = -1.55 + index * 0.62;
-    const pos = new THREE.Vector3(x, 0.02, 2.35 - angle);
+    const pos = new THREE.Vector3(0, 0.02, 3.6);
     this.seatPositions.set(id, pos.clone());
     this.playerSlots.set(id, [this.createSlot(pos, true)]);
 
     const name = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
     name.scale.set(1.5, 0.34, 1);
-    name.position.set(pos.x, 0.42, pos.z + 0.55);
     this.scene.add(name);
     this.nameSprites.set(id, name);
 
     const chips = new THREE.Group();
-    chips.position.set(pos.x, 0.03, pos.z - 0.95);
     this.scene.add(chips);
     this.chipStacks.set(id, chips);
 
@@ -231,9 +227,44 @@ export class BlackjackScene {
       }),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(pos.x, 0.018, pos.z);
     this.scene.add(ring);
     this.turnRings.set(id, ring);
+
+    this.applySeatPosition(id, pos);
+  }
+
+  private repositionSeats(): void {
+    const ids = [...this.playerSlots.keys()];
+    const count = ids.length;
+    for (let i = 0; i < ids.length; i++) {
+      const pos = this.computeSeatPosition(i, count);
+      this.applySeatPosition(ids[i]!, pos);
+    }
+  }
+
+  private computeSeatPosition(index: number, count: number): THREE.Vector3 {
+    if (count <= 1) return new THREE.Vector3(0, 0.02, 3.6);
+    const step = 0.65;
+    const maxTotal = Math.PI * 0.52;
+    const total = Math.min((count - 1) * step, maxTotal);
+    const a0 = Math.PI / 2 - total / 2;
+    const angle = a0 + index * (total / (count - 1));
+    return new THREE.Vector3(3.6 * Math.cos(angle), 0.02, 3.6 * Math.sin(angle));
+  }
+
+  private applySeatPosition(id: string, pos: THREE.Vector3): void {
+    this.seatPositions.get(id)!.copy(pos);
+    const name = this.nameSprites.get(id);
+    if (name) name.position.set(pos.x, 0.42, pos.z + 0.55);
+    const chips = this.chipStacks.get(id);
+    if (chips) {
+      const len = Math.hypot(pos.x, pos.z);
+      chips.position.set(pos.x - (0.95 * pos.x) / len, 0.03, pos.z - (0.95 * pos.z) / len);
+    }
+    const ring = this.turnRings.get(id);
+    if (ring) ring.position.set(pos.x, 0.018, pos.z);
+    const slots = this.playerSlots.get(id);
+    if (slots) for (const slot of slots) slot.group.position.copy(pos);
   }
 
   private removeSeat(id: string): void {
