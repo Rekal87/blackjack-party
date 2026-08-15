@@ -52,8 +52,8 @@ export class BlackjackScene {
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    this.camera.position.set(0, 5.4, 7.2);
+    this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+    this.camera.position.set(0, 7.2, 10);
     this.camera.lookAt(0, 0, 0);
 
     this.timer = new THREE.Timer();
@@ -204,7 +204,7 @@ export class BlackjackScene {
   }
 
   private addSeat(id: string): void {
-    const pos = new THREE.Vector3(0, 0.02, 3.6);
+    const pos = new THREE.Vector3(0, 0.02, 3.9);
     this.seatPositions.set(id, pos.clone());
     this.playerSlots.set(id, [this.createSlot(pos, true)]);
 
@@ -243,13 +243,13 @@ export class BlackjackScene {
   }
 
   private computeSeatPosition(index: number, count: number): THREE.Vector3 {
-    if (count <= 1) return new THREE.Vector3(0, 0.02, 3.6);
-    const step = 0.65;
-    const maxTotal = Math.PI * 0.52;
+    if (count <= 1) return new THREE.Vector3(0, 0.02, 3.9);
+    const step = 0.72;
+    const maxTotal = Math.PI * 0.78;
     const total = Math.min((count - 1) * step, maxTotal);
     const a0 = Math.PI / 2 - total / 2;
     const angle = a0 + index * (total / (count - 1));
-    return new THREE.Vector3(3.6 * Math.cos(angle), 0.02, 3.6 * Math.sin(angle));
+    return new THREE.Vector3(3.9 * Math.cos(angle), 0.02, 3.9 * Math.sin(angle));
   }
 
   private applySeatPosition(id: string, pos: THREE.Vector3): void {
