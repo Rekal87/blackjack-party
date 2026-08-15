@@ -1,41 +1,108 @@
 import { serve } from "bun";
 import index from "./index.html";
+import { Rooms } from "./server/rooms";
+import { createDeck } from "./shared/cards";
+import type { ServerWebSocket, Server } from "bun";
+import type { Room } from "./server/room";
 
-const server = serve({
+const rooms = new Rooms(() => createDeck());
+
+interface ClientMessage {
+  type: string;
+  name?: string;
+  code?: string;
+  amount?: number;
+}
+
+interface WsData {
+  room?: Room;
+  playerId?: string;
+}
+
+function isClientMessage(data: unknown): data is ClientMessage {
+  return typeof data === "object" && data !== null && "type" in data;
+}
+
+type Ws = ServerWebSocket<WsData>;
+
+const server = serve<WsData>({
   routes: {
-    // Serve index.html for all unmatched routes.
     "/*": index,
-
-    "/api/hello": {
-      async GET(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "GET",
-        });
+    "/ws": {
+      GET: (req: Request, server: Server<WsData>) => {
+        if (server.upgrade(req, { data: { room: undefined, playerId: undefined } })) return;
+        return new Response("upgrade failed", { status: 500 });
       },
-      async PUT(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "PUT",
-        });
-      },
-    },
-
-    "/api/hello/:name": async req => {
-      const name = req.params.name;
-      return Response.json({
-        message: `Hello, ${name}!`,
-      });
     },
   },
-
+  websocket: {
+    open(ws) {
+      ws.data = { room: undefined, playerId: undefined };
+    },
+    message(ws, raw) {
+      handleMessage(ws, raw);
+    },
+    close(ws) {},
+  },
   development: process.env.NODE_ENV !== "production" && {
-    // Enable browser hot reloading in development
     hmr: true,
-
-    // Echo console logs from the browser to the server
     console: true,
   },
 });
+
+function send(ws: Ws, message: unknown): void {
+  ws.send(JSON.stringify(message));
+}
+
+function handleMessage(ws: Ws, raw: unknown): void {
+  let message: ClientMessage;
+  if (typeof raw !== "string") return;
+  try {
+    message = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!isClientMessage(message)) return;
+
+  const { type, name, code, amount } = message;
+  const state = ws.data;
+
+  try {
+    switch (type) {
+      case "createRoom": {
+        const room = rooms.create(name ?? "Player", ws);
+        const playerId = room.state().players.at(-1)!.id;
+        state.room = room;
+        state.playerId = playerId;
+        send(ws, { type: "roomJoined", room: room.state(), playerId });
+        break;
+      }
+      case "join": {
+        const room = rooms.join(code ?? "", name ?? "Player", ws);
+        const playerId = room.state().players.at(-1)!.id;
+        state.room = room;
+        state.playerId = playerId;
+        send(ws, { type: "roomJoined", room: room.state(), playerId });
+        break;
+      }
+      case "startTable":
+        state.room!.startTable(state.playerId!);
+        break;
+      case "placeBet":
+        state.room!.placeBet(state.playerId!, amount ?? 0);
+        break;
+      case "hit":
+        state.room!.hit(state.playerId!);
+        break;
+      case "stand":
+        state.room!.stand(state.playerId!);
+        break;
+      default:
+        send(ws, { type: "error", message: `unknown message type: ${type}` });
+    }
+  } catch (error) {
+    send(ws, { type: "error", message: error instanceof Error ? error.message : "unknown error" });
+  }
+}
 
 console.log(`🚀 Server running at ${server.url}`);

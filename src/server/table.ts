@@ -17,6 +17,7 @@ export interface TableHand {
   cards: Card[];
   status: HandStatus;
   result?: HandResult;
+  hiddenCount?: number;
 }
 
 export interface TableDealer {
