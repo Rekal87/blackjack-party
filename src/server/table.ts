@@ -17,6 +17,8 @@ export interface TableHand {
   cards: Card[];
   status: HandStatus;
   result?: HandResult;
+  bet: number;
+  natural?: boolean;
   hiddenCount?: number;
 }
 
@@ -31,6 +33,7 @@ export interface TableState {
   players: TablePlayer[];
   dealer: TableDealer;
   currentTurn: string | null;
+  currentHand: number;
 }
 
 export interface TableConfig {
@@ -55,6 +58,7 @@ export class Table {
   private phase: Phase = "betting";
   private round = 1;
   private currentTurnIndex = 0;
+  private currentHandIndex = 0;
   private minBet: number;
   private maxBet: number;
 
@@ -86,6 +90,7 @@ export class Table {
         holeRevealed: this.dealer.holeRevealed,
       },
       currentTurn: this.phase === "acting" ? this.players[this.currentTurnIndex]?.id ?? null : null,
+      currentHand: this.phase === "acting" ? this.currentHandIndex : 0,
     };
   }
 
@@ -104,7 +109,7 @@ export class Table {
     if (this.phase !== "acting") throw new Error("not in the acting phase");
     this.assertCurrent(playerId);
     const player = this.currentPlayer();
-    const hand = player.hands[0]!;
+    const hand = player.hands[this.currentHandIndex]!;
     const card = this.draw();
     hand.cards.push(card);
     if (value(hand.cards) > 21) {
@@ -116,9 +121,46 @@ export class Table {
   stand(playerId: string): void {
     if (this.phase !== "acting") throw new Error("not in the acting phase");
     this.assertCurrent(playerId);
-    const hand = this.currentPlayer().hands[0]!;
+    const hand = this.currentPlayer().hands[this.currentHandIndex]!;
     hand.status = "stood";
     this.advanceTurn();
+  }
+
+  double(playerId: string): void {
+    if (this.phase !== "acting") throw new Error("not in the acting phase");
+    this.assertCurrent(playerId);
+    const player = this.currentPlayer();
+    const hand = player.hands[this.currentHandIndex]!;
+    if (player.hands.length > 1) throw new Error("cannot double after a split");
+    if (hand.cards.length !== 2) throw new Error("can only double on two cards");
+    if (hand.bet * 2 > player.bankroll) throw new Error("double exceeds bankroll");
+    hand.bet *= 2;
+    const card = this.draw();
+    hand.cards.push(card);
+    hand.status = value(hand.cards) > 21 ? "busted" : "stood";
+    this.advanceTurn();
+  }
+
+  split(playerId: string): void {
+    if (this.phase !== "acting") throw new Error("not in the acting phase");
+    this.assertCurrent(playerId);
+    const player = this.currentPlayer();
+    const hand = player.hands[this.currentHandIndex]!;
+    if (player.hands.length > 1) throw new Error("cannot re-split");
+    if (hand.cards.length !== 2) throw new Error("can only split a pair");
+    if (hand.cards[0]!.rank !== hand.cards[1]!.rank) throw new Error("cards are not a pair");
+    if (hand.bet * 2 > player.bankroll) throw new Error("split exceeds bankroll");
+    const first = { cards: [hand.cards[0]!], status: "active" as const, bet: hand.bet };
+    const second = { cards: [hand.cards[1]!], status: "active" as const, bet: hand.bet };
+    const aces = hand.cards[0]!.rank === "A";
+    player.hands = [first, second];
+    if (aces) {
+      for (const h of player.hands) {
+        h.cards.push(this.draw());
+        h.status = "stood";
+      }
+      this.advanceTurn();
+    }
   }
 
   private findPlayer(playerId: string): TablePlayer {
@@ -137,11 +179,17 @@ export class Table {
   }
 
   private advanceTurn(): void {
-    this.currentTurnIndex++;
+    this.currentHandIndex++;
     while (this.currentTurnIndex < this.players.length) {
-      const hand = this.players[this.currentTurnIndex]!.hands[0];
-      if (hand && hand.status === "active") return;
+      const player = this.players[this.currentTurnIndex]!;
+      if (this.currentHandIndex < player.hands.length) {
+        const hand = player.hands[this.currentHandIndex];
+        if (hand && hand.status === "active") return;
+        this.currentHandIndex++;
+        continue;
+      }
       this.currentTurnIndex++;
+      this.currentHandIndex = 0;
     }
     this.dealerPlay();
   }
@@ -149,7 +197,7 @@ export class Table {
   private deal(): void {
     this.deck.shuffle();
     for (const player of this.players) {
-      player.hands = [{ cards: [], status: "active" }];
+      player.hands = [{ cards: [], status: "active", bet: player.bet }];
     }
     for (const player of this.players) {
       player.hands[0]!.cards.push(this.draw());
@@ -159,14 +207,29 @@ export class Table {
       player.hands[0]!.cards.push(this.draw());
     }
     this.dealer.cards.push(this.draw());
+    for (const player of this.players) {
+      const hand = player.hands[0]!;
+      if (handValue(hand.cards).total === 21) {
+        hand.natural = true;
+        hand.status = "stood";
+      }
+    }
     this.currentTurnIndex = 0;
+    this.currentHandIndex = 0;
     this.phase = "acting";
+    while (
+      this.currentTurnIndex < this.players.length &&
+      this.players[this.currentTurnIndex]!.hands[0]!.status !== "active"
+    ) {
+      this.currentTurnIndex++;
+    }
+    if (this.currentTurnIndex >= this.players.length) this.dealerPlay();
   }
 
   private dealerPlay(): void {
     this.phase = "dealer";
     const hasLiveHand = this.players.some(
-      (p) => p.hands[0] && p.hands[0].status !== "busted",
+      (p) => p.hands.some((h) => h.status !== "busted"),
     );
     if (hasLiveHand) {
       while (this.shouldDealerDraw()) {
@@ -189,24 +252,31 @@ export class Table {
     this.dealer.holeRevealed = true;
     const dealerTotal = value(this.dealer.cards);
     const dealerBust = dealerTotal > 21;
+    const dealerNatural = this.dealer.cards.length === 2 && dealerTotal === 21;
     for (const player of this.players) {
-      const hand = player.hands[0];
-      if (!hand) continue;
-      const total = value(hand.cards);
-      if (hand.status === "busted" || total > 21) {
-        hand.result = "lost";
-        player.bankroll -= player.bet;
-      } else if (dealerBust) {
-        hand.result = "won";
-        player.bankroll += player.bet;
-      } else if (total === dealerTotal) {
-        hand.result = "push";
-      } else if (total > dealerTotal) {
-        hand.result = "won";
-        player.bankroll += player.bet;
-      } else {
-        hand.result = "lost";
-        player.bankroll -= player.bet;
+      for (const hand of player.hands) {
+        const total = value(hand.cards);
+        if (hand.natural) {
+          hand.result = dealerNatural ? "push" : "won";
+          if (!dealerNatural) player.bankroll += Math.round(hand.bet * 1.5);
+        } else if (dealerNatural) {
+          hand.result = "lost";
+          player.bankroll -= hand.bet;
+        } else if (hand.status === "busted" || total > 21) {
+          hand.result = "lost";
+          player.bankroll -= hand.bet;
+        } else if (dealerBust) {
+          hand.result = "won";
+          player.bankroll += hand.bet;
+        } else if (total === dealerTotal) {
+          hand.result = "push";
+        } else if (total > dealerTotal) {
+          hand.result = "won";
+          player.bankroll += hand.bet;
+        } else {
+          hand.result = "lost";
+          player.bankroll -= hand.bet;
+        }
       }
     }
   }

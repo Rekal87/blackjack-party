@@ -20,6 +20,20 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
   const amount = Number(betAmount);
   const canBet = betting && !!me && me.bet === 0 && amount > 0;
 
+  const myActiveHand = myTurn && me ? me.hands[table.currentHand] : undefined;
+  const canDouble =
+    !!myActiveHand &&
+    me!.hands.length === 1 &&
+    myActiveHand.cards.length === 2 &&
+    !myActiveHand.natural &&
+    myActiveHand.bet * 2 <= me!.bankroll;
+  const canSplit =
+    !!myActiveHand &&
+    me!.hands.length === 1 &&
+    myActiveHand.cards.length === 2 &&
+    myActiveHand.cards[0]!.rank === myActiveHand.cards[1]!.rank &&
+    myActiveHand.bet * 2 <= me!.bankroll;
+
   const renderTable = (table: TableState) => {
     return (
     <div className="flex min-h-screen w-full flex-col items-center gap-8 p-6">
@@ -45,7 +59,6 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {table.players.map((p) => {
             const isMe = p.id === playerId;
-            const hand = p.hands[0];
             return (
               <div
                 key={p.id}
@@ -61,43 +74,56 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
                     {isMe ? " (you)" : ""}
                   </span>
                   <span className="text-muted-foreground">
-                    {p.bankroll} chips{isMe ? ` · bet ${p.bet}` : ""}
+                    {p.bankroll} chips{isMe ? ` · bet ${p.hands.reduce((s, h) => s + h.bet, 0) || p.bet}` : ""}
                   </span>
                 </div>
-                {hand && (
-                  <>
-                    <CardRow cards={hand.cards} hiddenCount={hand.hiddenCount} />
-                    <div className="mt-2 flex items-center gap-2 text-xs">
-                      {hand.status !== "active" && (
-                        <span
+                {p.hands.length > 0 ? (
+                  <div className="flex flex-wrap gap-3">
+                    {p.hands.map((hand, handIndex) => {
+                      const isActiveHand =
+                        table.currentTurn === p.id && table.phase === "acting" && table.currentHand === handIndex;
+                      return (
+                        <div
+                          key={handIndex}
                           className={
-                            "rounded px-1.5 py-0.5 font-medium " +
-                            (hand.status === "busted"
-                              ? "bg-destructive/10 text-destructive"
-                              : "bg-muted text-muted-foreground")
+                            "flex flex-col gap-2 rounded-lg p-2 " +
+                            (isActiveHand ? "ring-2 ring-primary" : "")
                           }
                         >
-                          {hand.status}
-                        </span>
-                      )}
-                      {hand.result && (
-                        <span
-                          className={
-                            "rounded px-1.5 py-0.5 font-medium " +
-                            (hand.result === "won"
-                              ? "bg-emerald-500/10 text-emerald-600"
-                              : hand.result === "lost"
-                                ? "bg-destructive/10 text-destructive"
-                                : "bg-muted text-muted-foreground")
-                          }
-                        >
-                          {hand.result}
-                        </span>
-                      )}
-                    </div>
-                  </>
+                          <CardRow cards={hand.cards} hiddenCount={hand.hiddenCount} />
+                          <div className="flex items-center gap-2 text-xs">
+                            {hand.natural && (
+                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600">
+                                Blackjack
+                              </span>
+                            )}
+                            {hand.status !== "active" && hand.status !== "stood" && (
+                              <span className="rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
+                                {hand.status}
+                              </span>
+                            )}
+                            {hand.result && (
+                              <span
+                                className={
+                                  "rounded px-1.5 py-0.5 font-medium " +
+                                  (hand.result === "won"
+                                    ? "bg-emerald-500/10 text-emerald-600"
+                                    : hand.result === "lost"
+                                      ? "bg-destructive/10 text-destructive"
+                                      : "bg-muted text-muted-foreground")
+                                }
+                              >
+                                {hand.result}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Waiting for cards…</p>
                 )}
-                {!hand && <p className="text-sm text-muted-foreground">Waiting for cards…</p>}
               </div>
             );
           })}
@@ -127,6 +153,16 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
               <Button variant="secondary" onClick={() => connection.send({ type: "stand" })}>
                 Stand
               </Button>
+              {canDouble && (
+                <Button variant="secondary" onClick={() => connection.send({ type: "double" })}>
+                  Double
+                </Button>
+              )}
+              {canSplit && (
+                <Button variant="secondary" onClick={() => connection.send({ type: "split" })}>
+                  Split
+                </Button>
+              )}
             </div>
           )}
           {isDealerPlaying && <p className="text-sm text-muted-foreground">Dealer is playing…</p>}

@@ -123,18 +123,19 @@ describe("filterTableState", () => {
           name: "Alice",
           bankroll: 1000,
           bet: 100,
-          hands: [{ cards: [card(10, "spades"), card(7, "hearts")], status: "active" }],
+          hands: [{ cards: [card(10, "spades"), card(7, "hearts")], status: "active", bet: 100 }],
         },
         {
           id: "bob",
           name: "Bob",
           bankroll: 1000,
           bet: 100,
-          hands: [{ cards: [card(9, "clubs"), card(5, "clubs")], status: "active" }],
+          hands: [{ cards: [card(9, "clubs"), card(5, "clubs")], status: "active", bet: 100 }],
         },
       ],
       dealer: { cards: [card(6, "diamonds")], holeRevealed: false },
       currentTurn: "alice",
+      currentHand: 0,
     };
   }
 

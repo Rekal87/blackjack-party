@@ -97,6 +97,12 @@ function handleMessage(ws: Ws, raw: unknown): void {
       case "stand":
         state.room!.stand(state.playerId!);
         break;
+      case "double":
+        state.room!.double(state.playerId!);
+        break;
+      case "split":
+        state.room!.split(state.playerId!);
+        break;
       default:
         send(ws, { type: "error", message: `unknown message type: ${type}` });
     }

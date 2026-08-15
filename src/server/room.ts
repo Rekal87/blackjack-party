@@ -35,6 +35,8 @@ export function filterTableState(state: TableState, viewerId: string): TableStat
           ...hand,
           cards: [],
           hiddenCount: hand.cards.length,
+          natural: undefined,
+          result: undefined,
         })),
       };
     }),
@@ -99,6 +101,16 @@ export class Room {
 
   stand(playerId: string): void {
     this.table!.stand(playerId);
+    this.broadcastTableState();
+  }
+
+  double(playerId: string): void {
+    this.table!.double(playerId);
+    this.broadcastTableState();
+  }
+
+  split(playerId: string): void {
+    this.table!.split(playerId);
     this.broadcastTableState();
   }
 
