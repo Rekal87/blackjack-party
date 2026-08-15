@@ -71,8 +71,7 @@ function drawFace(ctx: CanvasRenderingContext2D, card: Card): void {
   ctx.textBaseline = "middle";
 
   ctx.save();
-  ctx.translate(W - 52, 52);
-  ctx.rotate(Math.PI);
+  ctx.translate(W - 52, H - 52);
   ctx.font = "bold 58px 'Segoe UI', Arial, sans-serif";
   ctx.fillText(label, 0, 0);
   ctx.font = "44px 'Segoe UI', Arial, sans-serif";
