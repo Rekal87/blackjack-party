@@ -488,6 +488,122 @@ describe("Room: betting window & auto-advance", () => {
   });
 });
 
+describe("Room: host round controls", () => {
+  test("endRound is rejected for a non-host", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    room.startTable(room.state().hostId);
+    expect(() => room.endRound(bobId)).toThrow(/host/i);
+  });
+
+  test("endGame is rejected for a non-host", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    room.startTable(room.state().hostId);
+    expect(() => room.endGame(bobId)).toThrow(/host/i);
+  });
+
+  test("the host can end a round early during acting", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    expect(room.tableState()!.phase).toBe("acting");
+
+    room.endRound(hostId);
+    const state = room.tableState()!;
+    expect(state.phase).toBe("resolve");
+    expect(state.players.find((p) => p.id === hostId)!.hands[0]!.result).toBe("push");
+    expect(state.players.find((p) => p.id === bobId)!.hands[0]!.result).toBe("lost");
+  });
+
+  test("the host can end a resolved round and skip straight to the next", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.stand(hostId);
+    room.stand(bobId);
+    expect(room.tableState()!.phase).toBe("resolve");
+
+    room.endRound(hostId);
+    expect(room.tableState()!.phase).toBe("betting");
+    expect(room.tableState()!.round).toBe(2);
+  });
+
+  test("the host can end the round during betting, dealing and settling it", () => {
+    const { rooms } = makeRooms();
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    const bobId = room.state().players[1]!.id;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+
+    room.endRound(hostId);
+    const state = room.tableState()!;
+    expect(state.phase).toBe("resolve");
+    expect(state.players[0]!.hands[0]!.result).toBeDefined();
+  });
+
+  test("ending the game declares the current leader the winner", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bob 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bob 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const bobSocket = new FakeSocket();
+    const bobId = room.join("Bob", bobSocket);
+    const hostId = room.state().hostId;
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    room.placeBet(bobId, 100);
+    room.stand(hostId);
+    room.stand(bobId); // alice pushes, bob loses -> alice still leads
+    room.endGame(hostId);
+    const gameWon = hostSocket.messages().find((m) => (m as { type: string }).type === "gameWon");
+    expect((gameWon as { winnerName?: string } | undefined)?.winnerName).toBe("Alice");
+  });
+});
+
 describe("Room: disconnect, reconnect & host handover", () => {
   test("a disconnect mid-round auto-stands the player's hand and play continues", () => {
     const deck = () =>
@@ -647,7 +763,8 @@ describe("Room: spectators & late join", () => {
     const tableState = carolSocket.messages().find((m) => (m as { type: string }).type === "tableState");
     expect((tableState as { state?: TableState }).state?.phase).toBe("acting");
     expect((tableState as { state?: TableState }).state?.players.map((p) => p.id)).toEqual([hostId, bobId]);
-    expect((tableState as { state?: TableState }).state?.players[0]!.hands[0]!.cards).toHaveLength(2);
+    expect((tableState as { state?: TableState }).state?.players[0]!.hands[0]!.cards).toEqual([]);
+    expect((tableState as { state?: TableState }).state?.players[0]!.hands[0]!.hiddenCount).toBe(2);
   });
 
   test("a spectator sees the full action but cannot act", () => {
@@ -842,6 +959,45 @@ describe("Bots", () => {
     const botHand = table.players.find((p) => p.name === "Bot 1")!.hands[0]!;
     expect(botHand.cards.length).toBe(3);
     expect(botHand.status).toBe("stood");
+  });
+
+  test("a solo player never receives a bot's card faces through a full round", () => {
+    const deck = () =>
+      deckFrom([
+        card(10, "spades"), // alice 1 -> 17
+        card(9, "clubs"), // bot 1 -> 14
+        card(6, "diamonds"), // dealer up
+        card(7, "hearts"), // alice 2
+        card(5, "clubs"), // bot 2
+        card(8, "diamonds"), // dealer hole -> 14
+        card(6, "clubs"), // bot hit -> 20
+        card(3, "clubs"), // dealer draw -> 17
+      ]);
+    const { rooms, timers } = makeRooms(deck);
+    const hostSocket = new FakeSocket();
+    const room = rooms.create("Alice", hostSocket);
+    const hostId = room.state().hostId;
+    room.addBot(hostId);
+    room.startTable(hostId);
+    room.placeBet(hostId, 100);
+    timers.advance(4000); // bot bets
+    room.stand(hostId); // 17
+    timers.advance(5000); // bot hits
+    timers.advance(5000); // bot stands
+
+    const states = hostSocket.messages()
+      .filter((m) => (m as { type: string }).type === "tableState")
+      .map((m) => (m as { state: TableState }).state);
+    expect(states.length).toBeGreaterThan(0);
+    for (const state of states) {
+      for (const player of state.players) {
+        if (player.id === hostId) continue;
+        for (const hand of player.hands) {
+          expect(hand.cards).toEqual([]);
+          expect(hand.hiddenCount).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
   });
 
   test("bots cannot become host when the host disconnects", () => {

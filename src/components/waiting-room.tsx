@@ -76,6 +76,9 @@ export function WaitingRoom({
           )}
           {!isHost && <p className="text-center text-sm text-muted-foreground">The Host will start the table.</p>}
           {connection.error && <p className="text-sm text-destructive">{connection.error}</p>}
+          <Button variant="ghost" onClick={connection.leave} className="w-full text-muted-foreground">
+            Cancel · Leave Room
+          </Button>
         </CardContent>
       </Card>
     </div>

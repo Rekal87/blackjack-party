@@ -129,6 +129,14 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
       return sum;
     }, 0);
 
+  const settled = table.players.filter((p) => p.hands.some((h) => h.result !== undefined));
+  let roundTop: { p: (typeof table.players)[number]; net: number } | null = null;
+  for (const p of settled) {
+    const net = netFor(p);
+    if (roundTop === null || net > roundTop.net) roundTop = { p, net };
+  }
+  const roundAllPush = settled.length > 0 && settled.every((p) => netFor(p) === 0);
+
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden">
       <div className="relative min-h-0 flex-1">
@@ -143,16 +151,39 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
               Room <span className="font-mono font-semibold">{connection.roomCode}</span> · Round {table.round}
             </div>
             {amHost && !connection.gameWon && (
-              <button
-                type="button"
-                onClick={() => connection.send({ type: "addBot" })}
-                disabled={connection.roster.length >= 6}
-                className="pointer-events-auto flex h-8 items-center justify-center rounded-lg bg-black/40 px-2.5 text-sm text-amber-100/90 backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Add a bot to play the dealer"
-                aria-label="Add Bot"
-              >
-                Add Bot
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => connection.send({ type: "addBot" })}
+                  disabled={connection.roster.length >= 6}
+                  className="pointer-events-auto flex h-8 items-center justify-center rounded-lg bg-black/40 px-2.5 text-sm text-amber-100/90 backdrop-blur transition-colors hover:bg-black/60 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Add a bot to play the dealer"
+                  aria-label="Add Bot"
+                >
+                  Add Bot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => connection.send({ type: "endRound" })}
+                  className="pointer-events-auto flex h-8 items-center justify-center rounded-lg bg-black/40 px-2.5 text-sm text-amber-100/90 backdrop-blur transition-colors hover:bg-black/60"
+                  title="Settle the current round immediately"
+                  aria-label="End Round"
+                >
+                  End Round
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    connection.send({ type: "endGame" });
+                    connection.leave();
+                  }}
+                  className="pointer-events-auto flex h-8 items-center justify-center rounded-lg bg-red-950/60 px-2.5 text-sm text-red-100 backdrop-blur transition-colors hover:bg-red-900/70"
+                  title="Declare the current leader the winner and end the game"
+                  aria-label="End Game"
+                >
+                  End Game
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -207,6 +238,91 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
           })}
         </div>
 
+        {table.phase === "resolve" && !connection.gameWon && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2">
+            <div className="pointer-events-auto flex w-[min(92vw,26rem)] flex-col items-center gap-2 rounded-2xl bg-black/65 p-4 text-center shadow-2xl backdrop-blur">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-100/60">
+                Round {table.round} · Results
+              </p>
+              <div
+                className={
+                  "flex w-full items-center justify-center gap-3 rounded-xl border px-4 py-2.5 " +
+                  (roundAllPush
+                    ? "border-amber-200/30 bg-amber-500/10"
+                    : roundTop && roundTop.net > 0
+                      ? "border-amber-300/60 bg-gradient-to-br from-amber-400/30 via-amber-500/20 to-yellow-600/15"
+                      : "border-red-400/40 bg-red-500/10")
+                }
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={
+                    "h-9 w-9 shrink-0 " +
+                    (roundAllPush
+                      ? "text-amber-200/60"
+                      : roundTop && roundTop.net > 0
+                        ? "text-amber-300"
+                        : "text-red-300/80")
+                  }
+                >
+                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+                  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                  <path d="M4 22h16" />
+                  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                </svg>
+                <div className="flex flex-col items-start">
+                  <p className="text-lg font-bold leading-tight text-amber-50">
+                    {roundAllPush
+                      ? "Push — nobody wins"
+                      : roundTop && roundTop.net > 0
+                        ? `${roundTop.p.name}${roundTop.p.id === playerId ? " (you)" : ""} wins the round`
+                        : "Dealer wins the round"}
+                  </p>
+                  {!roundAllPush && roundTop && roundTop.net > 0 && (
+                    <p className="text-sm font-semibold text-emerald-300">+{roundTop.net}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                {table.players.map((p) => {
+                  const net = netFor(p);
+                  const tone =
+                    net > 0
+                      ? "border-emerald-400/40 text-emerald-200"
+                      : net < 0
+                        ? "border-red-400/40 text-red-200"
+                        : "border-amber-200/20 text-amber-100/70";
+                  return (
+                    <div
+                      key={p.id}
+                      className={
+                        "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm " +
+                        tone +
+                        (p.id === playerId ? " bg-white/10 ring-1 ring-white/20" : " bg-black/30")
+                      }
+                    >
+                      <span className="font-semibold">
+                        {p.name}
+                        {p.id === playerId ? " (you)" : ""}
+                      </span>
+                      <span className="font-mono text-xs opacity-90">
+                        {net > 0 ? `+${net}` : net < 0 ? `${net}` : "push"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="pointer-events-none absolute bottom-4 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
           {connection.gameWon && (
             <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-xl bg-black/60 p-4 text-center backdrop-blur">
@@ -293,42 +409,6 @@ export function Table({ connection, playerId }: { connection: GameConnection; pl
             <p className="rounded-md bg-black/50 px-3 py-1.5 text-sm text-amber-100 backdrop-blur">
               Waiting for {currentTurnName}…
             </p>
-          )}
-          {table.phase === "resolve" && !connection.gameWon && (
-            <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-xl bg-black/60 p-3 backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-100/60">
-                Round {table.round} results
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-1.5">
-                {table.players.map((p) => {
-                  const net = netFor(p);
-                  const tone =
-                    net > 0
-                      ? "border-emerald-400/40 text-emerald-200"
-                      : net < 0
-                        ? "border-red-400/40 text-red-200"
-                        : "border-amber-200/20 text-amber-100/70";
-                  return (
-                    <div
-                      key={p.id}
-                      className={
-                        "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm " +
-                        tone +
-                        (p.id === playerId ? " bg-white/10 ring-1 ring-white/20" : " bg-black/30")
-                      }
-                    >
-                      <span className="font-semibold">
-                        {p.name}
-                        {p.id === playerId ? " (you)" : ""}
-                      </span>
-                      <span className="font-mono text-xs opacity-90">
-                        {net > 0 ? `+${net}` : net < 0 ? `${net}` : "push"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           )}
         </div>
       </div>

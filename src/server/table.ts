@@ -271,6 +271,19 @@ export class Table {
     this.dealerPlay();
   }
 
+  endRoundNow(): void {
+    if (this.phase === "resolve") return;
+    if (this.phase === "betting") this.deal();
+    if (this.phase === "acting") {
+      for (const player of this.players) {
+        for (const hand of player.hands) {
+          if (hand.status === "active") hand.status = "stood";
+        }
+      }
+      this.dealerPlay();
+    }
+  }
+
   newRound(): string[] {
     const removed: string[] = [];
     this.players = this.players.filter((p) => {

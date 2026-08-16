@@ -13,6 +13,7 @@ export interface GameConnection {
   gameWon: { winnerId: string; winnerName: string } | null;
   error: string | null;
   send: (message: ClientMessage) => void;
+  leave: () => void;
 }
 
 const STORAGE_KEY = "blackjack.identity";
@@ -154,7 +155,21 @@ export function useGameConnection(): GameConnection {
     wsRef.current?.send(JSON.stringify(message));
   }, []);
 
-  return { status, playerId, hostId, roomCode, roster, tableStarted, table, gameWon, error, send };
+  const leave = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: "leave" }));
+    clearIdentity();
+    setStatus("open");
+    setPlayerId(null);
+    setHostId(null);
+    setRoomCode(null);
+    setRoster([]);
+    setTableStarted(false);
+    setTable(null);
+    setGameWon(null);
+    setError(null);
+  }, []);
+
+  return { status, playerId, hostId, roomCode, roster, tableStarted, table, gameWon, error, send, leave };
 }
 
 export function leaveRoom(): void {

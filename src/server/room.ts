@@ -44,26 +44,22 @@ export const ROUND_PAUSE_MS = 5_000;
 
 export function filterTableState(state: TableState, viewerId: string): TableState {
   const revealed = state.phase === "resolve";
-  const isParticipant = state.players.some((p) => p.id === viewerId);
-  if (isParticipant) {
-    return {
-      ...state,
-      players: state.players.map((player) => {
-        if (player.id === viewerId) return player;
-        return {
-          ...player,
-          hands: player.hands.map((hand) => ({
-            ...hand,
-            cards: [],
-            hiddenCount: hand.cards.length,
-            natural: revealed ? hand.natural : undefined,
-            result: revealed ? hand.result : undefined,
-          })),
-        };
-      }),
-    };
-  }
-  return state;
+  return {
+    ...state,
+    players: state.players.map((player) => {
+      if (player.id === viewerId) return player;
+      return {
+        ...player,
+        hands: player.hands.map((hand) => ({
+          ...hand,
+          cards: [],
+          hiddenCount: hand.cards.length,
+          natural: revealed ? hand.natural : undefined,
+          result: revealed ? hand.result : undefined,
+        })),
+      };
+    }),
+  };
 }
 
 export class Room {
@@ -192,6 +188,33 @@ export class Room {
   split(playerId: string): void {
     this.table!.split(playerId);
     this.afterTableChange();
+  }
+
+  endRound(playerId: string): void {
+    if (playerId !== this.hostId) throw new Error("only the host can end the round");
+    if (!this.table) throw new Error("no table in progress");
+    this.clearRoundTimer();
+    const phase = this.table.state().phase;
+    if (phase === "resolve") {
+      this.nextRound();
+      return;
+    }
+    this.table.endRoundNow();
+    this.afterTableChange();
+  }
+
+  endGame(playerId: string): void {
+    if (playerId !== this.hostId) throw new Error("only the host can end the game");
+    if (!this.table) throw new Error("no table in progress");
+    this.clearBettingTimer();
+    this.clearRoundTimer();
+    this.clearBotTimers();
+    const state = this.table.state();
+    if (state.players.length > 0) {
+      const leader = state.players.reduce((best, p) => (p.bankroll > best.bankroll ? p : best));
+      this.broadcast({ type: "gameWon", winnerId: leader.id, winnerName: leader.name });
+    }
+    this.broadcastTableState();
   }
 
   leave(playerId: string): void {

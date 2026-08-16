@@ -31,6 +31,7 @@ function isClientMessage(data: unknown): data is ClientMessage {
 type Ws = ServerWebSocket<WsData>;
 
 const server = serve<WsData>({
+  port: Number(process.env.PORT) || 4000,
   routes: {
     "/*": index,
     "/ws": {
@@ -123,6 +124,17 @@ function handleMessage(ws: Ws, raw: unknown): void {
         break;
       case "split":
         state.room!.split(state.playerId!);
+        break;
+      case "endRound":
+        state.room!.endRound(state.playerId!);
+        break;
+      case "endGame":
+        state.room!.endGame(state.playerId!);
+        break;
+      case "leave":
+        state.room!.leave(state.playerId!);
+        state.room = undefined;
+        state.playerId = undefined;
         break;
       default:
         send(ws, { type: "error", message: `unknown message type: ${type}` });

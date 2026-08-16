@@ -13,6 +13,8 @@ export type ClientMessage =
   | { type: "stand" }
   | { type: "double" }
   | { type: "split" }
+  | { type: "endRound" }
+  | { type: "endGame" }
   | { type: "leave" };
 
 export type ServerMessage =

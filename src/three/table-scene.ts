@@ -4,9 +4,10 @@ import type { Card } from "../shared/cards";
 import type { TableState } from "../server/table";
 import { cardBackTexture, cardFaceTexture, feltTexture } from "./textures";
 
-const CARD_W = 0.9;
-const CARD_H = 1.26;
+const CARD_W = 0.77;
+const CARD_H = 1.08;
 const CARD_T = 0.06;
+const CARD_SPREAD = 0.36;
 
 interface CardObject {
   group: THREE.Group;
@@ -187,20 +188,37 @@ export class BlackjackScene {
     this.repositionSeats();
     const deckPos = new THREE.Vector3(0, 0.6, -4.4);
     for (const p of state.players) {
-      const slots = this.playerSlots.get(p.id)!;
       const seatPos = this.seatPositions.get(p.id)!;
+      const slots = this.ensureSlots(p.id, p.hands.length);
       for (let h = 0; h < p.hands.length; h++) {
-        const slot = slots[h] ?? this.createSlot(seatPos.clone(), true);
+        const slot = slots[h]!;
+        const offset = this.handOffset(h, p.hands.length);
+        slot.group.position.set(seatPos.x + offset.x, seatPos.y, seatPos.z + offset.z);
         const hand = p.hands[h]!;
         const desired = hand.hiddenCount !== undefined
           ? Array.from({ length: hand.hiddenCount }, () => ({ face: null, faceDown: true }))
           : hand.cards.map((c) => ({ face: c, faceDown: false }));
         this.reconcile(slot, desired, deckPos);
       }
-      if (p.hands.length === 0 && slots.length > 0) {
-        this.reconcile(slots[0]!, [], deckPos);
-      }
     }
+  }
+
+  private ensureSlots(id: string, count: number): SlotState[] {
+    const slots = this.playerSlots.get(id)!;
+    while (slots.length < count) {
+      slots.push(this.createSlot(this.seatPositions.get(id)!.clone(), true));
+    }
+    while (slots.length > count) {
+      const extra = slots.pop()!;
+      this.clearSlot(extra);
+    }
+    return slots;
+  }
+
+  private handOffset(index: number, count: number): THREE.Vector3 {
+    if (count <= 1) return new THREE.Vector3(0, 0, 0);
+    const gap = 0.56;
+    return new THREE.Vector3((index - (count - 1) / 2) * gap, 0, 0);
   }
 
   private addSeat(id: string): void {
@@ -324,7 +342,7 @@ export class BlackjackScene {
     const existing = slot.objects;
     const maxLen = Math.max(existing.length, desired.length);
     const next: CardObject[] = [];
-    const spread = (desired.length - 1) * 0.42;
+    const spread = (desired.length - 1) * CARD_SPREAD;
     for (let i = 0; i < maxLen; i++) {
       const want = desired[i];
       let obj = existing[i];
@@ -354,7 +372,7 @@ export class BlackjackScene {
   }
 
   private cardTarget(index: number, spread: number, seat: THREE.Vector3): THREE.Vector3 {
-    const x = seat.x - spread / 2 + index * 0.42;
+    const x = seat.x - spread / 2 + index * CARD_SPREAD;
     return new THREE.Vector3(x, 0.06, seat.z);
   }
 
@@ -439,7 +457,7 @@ export class BlackjackScene {
         const e = 1 - Math.pow(1 - p, 3);
         const pos = this.cardTarget(
           slot.objects.indexOf(obj),
-          (slot.objects.length - 1) * 0.42,
+          (slot.objects.length - 1) * CARD_SPREAD,
           slot.group.position,
         );
         obj.group.position.lerpVectors(tween.start, pos, e);
