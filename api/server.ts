@@ -1,6 +1,6 @@
 import { serve } from "bun";
-import { createGameApp } from "@/server/app";
-import type { WsData } from "@/server/app";
+import { createGameApp } from "../src/server/app";
+import type { WsData } from "../src/server/app";
 
 const app = createGameApp();
 
@@ -9,7 +9,7 @@ const server = serve<WsData>({
   async fetch(req, server) {
     const url = new URL(req.url);
 
-    if (url.pathname === "/ws") {
+    if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
       if (server.upgrade(req, { data: { room: undefined, playerId: undefined } })) return;
       return new Response("upgrade failed", { status: 500 });
     }

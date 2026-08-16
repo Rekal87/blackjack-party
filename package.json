@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/index.ts",
-    "start": "bun run build && bun src/server.ts",
+    "start": "bun run build && bun api/server.ts",
     "build": "bun run build.ts"
   },
   "dependencies": {

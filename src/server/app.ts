@@ -1,7 +1,7 @@
-import { createDeck } from "@/shared/cards";
-import { Rooms } from "@/server/rooms";
+import { createDeck } from "../shared/cards";
+import { Rooms } from "./rooms";
 import type { ServerWebSocket } from "bun";
-import type { Room } from "@/server/room";
+import type { Room } from "./room";
 
 export interface WsData {
   room?: Room;
